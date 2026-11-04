@@ -58,9 +58,19 @@ class WordBuilder(private val pageWidthMm: Double = 210.0, private val pageHeigh
     private var pages = ArrayList<List<DocItem>>()
     private var batch = BatchTranslation()
 
-    /** Pagina di PDF digitale riprodotta esattamente. [crop] ritaglia una zona (punti) e la restituisce in PNG o JPEG. */
-    fun addExactPage(page: JsPage, crop: (l: Double, t: Double, r: Double, b: Double) -> ByteArray?) {
-        pages += listOf(ExactLayout.build(page.toPage()) { b -> crop(b.l.toDouble(), b.t.toDouble(), b.r.toDouble(), b.b.toDouble()) })
+    /**
+     * Pagina di PDF digitale riprodotta esattamente. [crop] ritaglia una zona (punti) e la restituisce in PNG o JPEG;
+     * [cropErasing] fa lo stesso cancellando i riquadri [erase] (l, t, r, b in punti) con il colore che li circonda.
+     */
+    fun addExactPage(
+        page: JsPage,
+        crop: (l: Double, t: Double, r: Double, b: Double) -> ByteArray?,
+        cropErasing: (l: Double, t: Double, r: Double, b: Double, erase: Array<DoubleArray>) -> ByteArray?,
+    ) {
+        pages += listOf(ExactLayout.build(page.toPage(), { b, er ->
+            cropErasing(b.l.toDouble(), b.t.toDouble(), b.r.toDouble(), b.b.toDouble(),
+                er.map { doubleArrayOf(it.l.toDouble(), it.t.toDouble(), it.r.toDouble(), it.b.toDouble()) }.toTypedArray())
+        }) { b -> crop(b.l.toDouble(), b.t.toDouble(), b.r.toDouble(), b.b.toDouble()) })
     }
 
     /**
@@ -126,4 +136,25 @@ class TextTranslation {
     fun requests(texts: Array<String>): Array<String> = batch.collect { tr -> texts.forEach { tr.text(it) } }.toTypedArray()
     fun put(source: String, translated: String) = batch.put(source, translated)
     fun translate(text: String): String = batch.apply { it.text(text) }
+}
+
+/**
+ * PDF di immagini JPEG, una per pagina. [pageWidthPt]/[pageHeightPt] = 0 → pagina grande quanto l'immagine
+ * (a 150 dpi); altrimenti l'immagine è adattata e centrata nella pagina, con [marginPt] di margine.
+ */
+@JsExport
+class ImagePdfBuilder {
+    private val w = MiniPdfWriter()
+    fun addPage(jpeg: ByteArray, imgW: Int, imgH: Int, pageWidthPt: Double, pageHeightPt: Double, marginPt: Double) {
+        if (pageWidthPt <= 0.0 || pageHeightPt <= 0.0) {
+            val pw = imgW * 72f / 150f; val ph = imgH * 72f / 150f
+            w.addPage(jpeg, imgW, imgH, pw, ph, 0f, 0f, pw, ph)
+            return
+        }
+        val pw = pageWidthPt.toFloat(); val ph = pageHeightPt.toFloat(); val m = marginPt.toFloat()
+        val s = minOf((pw - 2 * m) / imgW, (ph - 2 * m) / imgH)
+        val dw = imgW * s; val dh = imgH * s
+        w.addPage(jpeg, imgW, imgH, pw, ph, (pw - dw) / 2f, (ph - dh) / 2f, dw, dh)
+    }
+    fun finish(title: String): ByteArray = w.finish(title)
 }

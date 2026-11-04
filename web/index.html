@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DocVerso</title>
+  <meta name="description" content="Converti e traduci PDF, Word e immagini direttamente nel browser: i file non escono dal tuo computer.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script>
+    // Tema prima del primo disegno (niente lampo chiaro col tema scuro)
+    try { const t = localStorage.getItem('docverso-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./" aria-label="DocVerso, pagina iniziale">
+      <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+        <path class="mark-recto" d="M8 5h16l8 8v22H8z"/>
+        <path class="mark-fold" d="M24 5v8h8"/>
+        <path class="mark-arrow" d="M14 24h12m-4-4 4 4-4 4"/>
+      </svg>
+      <span class="brand-name">DocVerso</span>
+    </a>
+    <div class="theme" role="radiogroup" aria-label="Tema">
+      <button type="button" role="radio" data-theme-set="light">Chiaro</button>
+      <button type="button" role="radio" data-theme-set="dark">Scuro</button>
+      <button type="button" role="radio" data-theme-set="auto">Automatico</button>
+    </div>
+  </header>
+
+  <main class="sheet" id="sheet">
+    <section class="recto" aria-labelledby="recto-title">
+      <h1 id="recto-title">Converti e traduci documenti senza farli uscire dal computer</h1>
+      <label class="drop" id="drop">
+        <input type="file" id="pick" multiple accept=".pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp,.gif,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*">
+        <span class="drop-main">Trascina qui un PDF, un file Word o delle immagini</span>
+        <span class="drop-sub">oppure <u>scegli i file</u></span>
+      </label>
+      <ol class="files" id="files" aria-label="File scelti"></ol>
+      <p class="hint" id="files-hint"></p>
+    </section>
+
+    <div class="fold" aria-hidden="true"></div>
+
+    <section class="verso" aria-labelledby="verso-title">
+      <div class="verso-inner" id="verso-inner">
+        <div class="face face-options" id="face-options">
+          <h2 id="verso-title">Cosa vuoi ottenere</h2>
+          <p class="empty" id="empty">Scegli un file a sinistra: qui compariranno le conversioni possibili.</p>
+          <fieldset class="choices" id="choices" hidden><legend class="sr">Conversione</legend></fieldset>
+          <div class="extra" id="extra"></div>
+          <button type="button" class="go" id="go" hidden>Converti</button>
+          <div class="progress" id="progress" hidden>
+            <div class="bar"><span id="bar"></span></div>
+            <p id="progress-text" aria-live="polite"></p>
+          </div>
+          <p class="error" id="error" role="alert" hidden></p>
+        </div>
+        <div class="face face-result" id="face-result" aria-live="polite">
+          <h2>Pronto</h2>
+          <ul class="results" id="results"></ul>
+          <button type="button" class="again" id="again">Fai un'altra conversione</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bottom">
+    <p>I file restano sul tuo computer: conversione, riconoscimento del testo e traduzione avvengono nel browser. Nessuna pubblicità.</p>
+    <p>Realizzata da Massimo Spagnuolo</p>
+  </footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

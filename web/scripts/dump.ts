@@ -1,0 +1,15 @@
+import { readFileSync } from 'fs';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { extractPage } from '../src/pdf/extract';
+import { nodePlatform } from './node-platform';
+const root = '/home/claude/docverso/web/node_modules/pdfjs-dist/';
+const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(process.argv[2])), fontExtraProperties: true, standardFontDataUrl: root + 'standard_fonts/' }).promise;
+const ex = await extractPage(await pdf.getPage(+(process.argv[3] ?? 1)), pdfjs.OPS as any, { encodeImage: nodePlatform.encodeImage });
+const r = (v: number) => Math.round(v * 10) / 10;
+console.log('fonts', ex.page.fonts);
+console.log('fills', ex.page.fills.filter(f => f.t < 130).map(f => [r(f.l), r(f.t), r(f.r), r(f.b), (f.color ?? 0).toString(16)]));
+console.log('art', ex.page.art.map(f => [r(f.l), r(f.t), r(f.r), r(f.b)]));
+console.log('glyphs', ex.page.glyphs.slice(0, 6).map(g => [g.ch, r(g.x), r(g.base), r(g.w), r(g.size)]));
+console.log('missing', ex.missing, 'pics', ex.page.pics.length);
+const odd = ex.page.glyphs.filter(g => /[^\x20-\x7e -ɏ‐-‧]/.test(g.ch));
+console.log('caratteri speciali', odd.slice(0, 20).map(g => [g.ch.codePointAt(0)!.toString(16), ex.page.fonts[g.font].name, Math.round(g.w * 10) / 10, g.size]));

@@ -8,3 +8,4 @@ web/src/engine/
 .idea/
 local.properties
 .DS_Store
+web/public/pdfjs/

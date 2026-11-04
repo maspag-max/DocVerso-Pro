@@ -91,6 +91,8 @@ sealed interface DocItem {
         val paras: List<Para>,
         val top: Float, val left: Float, val bottom: Float, val right: Float,
         val borderColor: Int = 0,
+        /** Colore di sfondo della cella 0xRRGGBB (null = nessuno). */
+        val shading: Int? = null,
     )
 
     /**

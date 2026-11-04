@@ -41,17 +41,22 @@ object ExactLayout {
 
     private const val THIN = 2.5f
 
-    /** [crop] ritaglia una zona della pagina disegnata e la restituisce in JPEG (null se non disponibile). */
-    fun build(page: Page, crop: (Box) -> ByteArray?): DocItem.ExactPage {
+    /**
+     * [crop] ritaglia una zona della pagina disegnata e la restituisce in PNG o JPEG (null se non disponibile).
+     * [cropErasing] (facoltativo) ritaglia una zona cancellando le lettere che ci stanno sopra (riquadri dati):
+     * serve per i disegni con testo sopra (loghi, intestazioni colorate), che vanno dietro al testo vero.
+     */
+    fun build(page: Page, cropErasing: ((Box, List<Box>) -> ByteArray?)? = null, crop: (Box) -> ByteArray?): DocItem.ExactPage {
         val anchors = ArrayList<DocItem.Anchor>()
 
-        // --- Linee e sfondi
+        // --- Linee e sfondi (gli sfondi delle celle diventano sfondi di cella, gli altri riquadri ancorati)
         val rules = ArrayList<Box>()
+        val solids = ArrayList<Box>()
         for (f in page.fills) {
             if (f.w <= 0f && f.h <= 0f) continue
             val thin = min(f.w, f.h) <= THIN && max(f.w, f.h) >= 2f * max(min(f.w, f.h), 0.5f)
             if (thin) rules += f
-            else if (!nearWhite(f.color) && f.w * f.h < page.w * page.h * 0.9f) anchors += solid(f, behind = true)
+            else if (!nearWhite(f.color) && f.w * f.h < page.w * page.h * 0.9f) solids += f
         }
 
         // --- Parole (lettere raggruppate) e codici a barre
@@ -59,9 +64,14 @@ object ExactLayout {
         val (barcodes, text) = words.partition { isBarcode(it, page.fonts) }
         val artBoxes = ArrayList<Box>()
         barcodes.forEach { w -> artBoxes += Box(w.l, w.base - w.size * 0.95f, w.r, w.base + w.size * 0.08f) }
-        // Disegni che non contengono testo (se contengono testo è uno sfondo decorativo: lo si ignora)
+        // Disegni senza testo: in primo piano. Con testo sopra (logo, fascia colorata): dietro al testo,
+        // con le lettere cancellate dal ritaglio (il testo resta modificabile e traducibile)
         for (a in mergeBoxes(page.art)) {
-            if (text.none { it.cx in a.l..a.r && it.cy in a.t..a.b }) artBoxes += a
+            val inside = text.filter { it.cx in a.l..a.r && it.cy in a.t..a.b }
+            if (inside.isEmpty()) { artBoxes += a; continue }
+            val c = pad(a, 0.5f, page)
+            val erase = inside.map { w -> Box(w.l - 0.8f, w.base - w.size * 0.95f, w.r + 0.8f, w.base + w.size * 0.25f) }
+            cropErasing?.invoke(c, erase)?.let { anchors += DocItem.Anchor(it, isPng(it), c.l, c.t, c.w, c.h, behind = true) }
         }
         for (a in artBoxes) {
             val c = pad(a, 0.5f, page)
@@ -76,6 +86,10 @@ object ExactLayout {
             if (g != null && text.any { g.contains(it) }) grids += g
             else group.forEach { anchors += solid(it, behind = false) }
         }
+
+        // Sfondi che stanno dentro una tabella: diventano sfondi di cella (si spostano con la tabella)
+        val inGrid = solids.filter { f -> grids.any { g -> f.l >= g.xs.first() - 2f && f.r <= g.xs.last() + 2f && f.t >= g.ys.first() - 2f && f.b <= g.ys.last() + 2f } }
+        solids.filter { it !in inGrid }.forEach { anchors += solid(it, behind = true) }
 
         // --- Righe di testo fuori dalle tabelle
         val free = text.filter { w -> grids.none { it.contains(w) } }
@@ -110,7 +124,7 @@ object ExactLayout {
                     blocks += DocItem.Para(emptyList(), 0f, h)
                     cursor += h
                 }
-                blocks += gridBlock(g, text, mL, page.fonts)
+                blocks += gridBlock(g, text, mL, page.fonts, inGrid)
                 cursor = max(cursor, g.ys.last())
                 lastWasGrid = true
                 i++
@@ -314,6 +328,7 @@ object ExactLayout {
             low.startsWith("dejavusans") -> "DejaVu Sans"
             low.startsWith("symbol") -> "Symbol"
             low.startsWith("zapfdingbats") -> "Wingdings"
+            low.startsWith("opensymbol") -> "Arial" // pallini degli elenchi di LibreOffice (già convertiti in •)
             else -> n.removeSuffix("MT").removeSuffix("PS").replace(Regex("(?<=[a-z])(?=[A-Z])"), " ").trim()
         }
     }
@@ -390,7 +405,7 @@ object ExactLayout {
         return GridShape(xs, ys, group)
     }
 
-    private fun gridBlock(g: GridShape, words: List<Word>, mL: Float, fonts: List<Font>): DocItem.Grid {
+    private fun gridBlock(g: GridShape, words: List<Word>, mL: Float, fonts: List<Font>, solids: List<Box> = emptyList()): DocItem.Grid {
         val nc = g.xs.size - 1
         val nr = g.ys.size - 1
         // Celle unite: manca la linea verticale fra due colonne o quella orizzontale fra due righe
@@ -431,6 +446,13 @@ object ExactLayout {
                 val left = g.vRule(x0, y0 + 0.5f, y1 - 0.5f)
                 val right = g.vRule(x1, y0 + 0.5f, y1 - 0.5f)
                 val color = listOfNotNull(top, left, bottom, right).firstOrNull()?.color ?: 0
+                // Sfondo: il riquadro colorato che copre la maggior parte della cella
+                val cy0 = g.ys[reg.r0]; val cy1 = g.ys[reg.r1 + 1]
+                val cellArea = (x1 - x0) * (cy1 - cy0)
+                val shade = solids.filter { f ->
+                    val ow = min(f.r, x1) - max(f.l, x0); val oh = min(f.b, cy1) - max(f.t, cy0)
+                    ow > 0f && oh > 0f && ow * oh >= cellArea * 0.6f
+                }.lastOrNull()?.color
                 cells += DocItem.GridCell(
                     span = reg.c1 - reg.c0 + 1,
                     vMerge = if (reg.r0 == reg.r1) 0 else if (reg.r0 == r) 1 else 2,
@@ -438,6 +460,7 @@ object ExactLayout {
                     top = top?.let { min(it.w, it.h) } ?: 0f, left = left?.let { min(it.w, it.h) } ?: 0f,
                     bottom = bottom?.let { min(it.w, it.h) } ?: 0f, right = right?.let { min(it.w, it.h) } ?: 0f,
                     borderColor = color,
+                    shading = shade,
                 )
                 c = reg.c1 + 1
             }

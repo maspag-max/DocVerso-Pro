@@ -66,7 +66,7 @@ class DocTranslator(private val raw: (String) -> String) {
         p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, p.marginB,
         p.blocks.map { b ->
             when (b) {
-                is DocItem.Para -> fit(para(b), b, p.widthPt - p.marginL - p.marginR)
+                is DocItem.Para -> (p.widthPt - p.marginL - p.marginR).let { u -> wrapFit(fit(para(b), b, u), b, u) }
                 is DocItem.Grid -> grid(b)
             }
         },
@@ -118,6 +118,25 @@ class DocTranslator(private val raw: (String) -> String) {
         return t.copy(pieces = out)
     }
 
+    /**
+     * Paragrafo di un solo pezzo (anche su più righe): se il testo tradotto avrebbe bisogno di più righe
+     * dell'originale, il carattere si riduce un poco (fino all'80%) perché resti nelle stesse righe e
+     * non sposti in basso il resto della pagina. [lines] = righe dell'originale, se note.
+     */
+    private fun wrapFit(t: DocItem.Para, orig: DocItem.Para, usable: Float, lines: Int? = null): DocItem.Para {
+        if (t.pieces.size != 1 || orig.pieces.size != 1 || t.frame != null) return t
+        val pc = t.pieces[0]
+        val avail = usable - (if (t.align == DocItem.Align.LEFT) pc.x else 0f) - t.rightPt
+        if (avail <= 10f) return t
+        val w0 = width(orig.pieces[0].runs); val w1 = width(pc.runs)
+        if (w1 <= w0) return t
+        val n0 = lines ?: kotlin.math.ceil(w0 * 0.98f / avail).toInt().coerceAtLeast(1)
+        val n1 = kotlin.math.ceil(w1 / avail).toInt()
+        if (n1 <= n0) return t
+        val f = (n0 * avail * 0.96f / w1).coerceIn(0.8f, 1f)
+        return t.copy(pieces = listOf(pc.copy(runs = pc.runs.map { r -> r.copy(sizePt = ((r.sizePt * f * 2f).roundToInt() / 2f).coerceAtLeast(4f)) })))
+    }
+
     private fun piece(pc: DocItem.Piece): DocItem.Piece = pc.copy(runs = runs(pc.runs))
 
     /** Pezzi con stili diversi: se uno prevale si traduce la frase intera con quello stile, altrimenti pezzo per pezzo. */
@@ -132,8 +151,23 @@ class DocTranslator(private val raw: (String) -> String) {
 
     private fun grid(g: DocItem.Grid): DocItem.Grid = g.copy(
         growRows = true, // le righe si allungano se il testo tradotto va a capo
-        rows = g.rows.map { r -> r.copy(cells = r.cells.map { c -> c.copy(paras = cellParas(c.paras)) }) },
+        rows = g.rows.map { r ->
+            var col = 0
+            r.copy(cells = r.cells.map { c ->
+                val w = g.cols.subList(col.coerceAtMost(g.cols.size), (col + c.span).coerceAtMost(g.cols.size)).sum()
+                col += c.span
+                val ps = cellParas(c.paras)
+                // Una frase sola nata da più righe: deve restare in quel numero di righe
+                val fitted = if (ps.size == 1 && c.paras.size > 1) listOf(wrapFit(ps[0], joined(c.paras), w - 1f, c.paras.size))
+                else ps.mapIndexed { k, p -> c.paras.getOrNull(k)?.let { o -> wrapFit(p, o, w - 1f) } ?: p }
+                c.copy(paras = fitted)
+            })
+        },
     )
+
+    /** Le righe originali di una cella come un solo pezzo (per misurarne la larghezza totale). */
+    private fun joined(ps: List<DocItem.Para>): DocItem.Para =
+        ps[0].copy(pieces = listOf(DocItem.Piece(ps[0].pieces.firstOrNull()?.x ?: 0f, ps.flatMap { p -> p.pieces.flatMap { it.runs } })))
 
     /** Le righe di una cella formano di solito una frase sola: si uniscono prima di tradurle. */
     private fun cellParas(ps: List<DocItem.Para>): List<DocItem.Para> {

@@ -234,6 +234,7 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
                 when (c.vMerge) { 1 -> body.append("<w:vMerge w:val=\"restart\"/>"); 2 -> body.append("<w:vMerge/>") }
                 body.append("<w:tcBorders>").append(border("top", c.top, c.borderColor)).append(border("left", c.left, c.borderColor))
                     .append(border("bottom", c.bottom, c.borderColor)).append(border("right", c.right, c.borderColor)).append("</w:tcBorders>")
+                c.shading?.let { body.append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"${hex(it)}\"/>") }
                 body.append("<w:vAlign w:val=\"top\"/></w:tcPr>")
                 if (c.paras.isEmpty()) body.append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr></w:p>")
                 else c.paras.forEach { exactPara(it) }
