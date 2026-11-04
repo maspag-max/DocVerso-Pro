@@ -1,6 +1,7 @@
 package it.spagnuolo.docverso.engine
 
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -62,8 +63,13 @@ class DocTranslator(private val raw: (String) -> String) {
         is DocItem.ExactPage -> exact(i)
     }
 
+    /**
+     * Pagina esatta tradotta. Il margine inferiore si riduce quasi a zero: le posizioni restano quelle
+     * dell'originale (sono misurate dall'alto), ma se il testo tradotto prende una riga in più la pagina
+     * ha spazio di riserva e la riga a piè di pagina non scivola sulla pagina dopo.
+     */
     private fun exact(p: DocItem.ExactPage) = DocItem.ExactPage(
-        p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, p.marginB,
+        p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, min(p.marginB, 2f),
         p.blocks.map { b ->
             when (b) {
                 is DocItem.Para -> (p.widthPt - p.marginL - p.marginR).let { u -> wrapFit(fit(para(b), b, u), b, u) }

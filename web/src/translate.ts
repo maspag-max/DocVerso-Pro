@@ -159,6 +159,12 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
           done++; progress?.(done, texts.length);
           return r.target.text;
         })));
+    } catch (e) {
+      // Errore (di solito la rete): il prossimo tentativo riparte da zero
+      translator?.delete(); translator = null; loadedPairs = '';
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(/Could not fetch|Failed to fetch|NetworkError|download/i.test(msg)
+        ? 'Non sono riuscito a scaricare il modello di traduzione: controlla la connessione a internet e riprova.' : msg, { cause: e });
     } finally {
       onBytes = null;
     }
