@@ -54,7 +54,7 @@ type Files = Record<string, MirrorFile>;
 
 let mozillaHashes: Promise<Set<string>> | null = null;
 function officialHashes(): Promise<Set<string>> {
-  mozillaHashes ??= fetch(MOZILLA_RECORDS, { credentials: 'omit' })
+  mozillaHashes ??= fetch(MOZILLA_RECORDS, { credentials: 'omit', signal: AbortSignal.timeout(20000) })
     .then(r => { if (!r.ok) throw new Error(); return r.json(); })
     .then(j => new Set<string>((j.data as any[]).map(r => r.attachment?.hash).filter(Boolean)))
     .catch(e => { mozillaHashes = null; throw new Error(OFFLINE, { cause: e }); });
@@ -68,7 +68,7 @@ function officialHashes(): Promise<Set<string>> {
 async function localPairFiles(from: string, to: string): Promise<Files | null> {
   try {
     const base = new URL(`${import.meta.env.BASE_URL}modelli/${from}-${to}/`, location.href);
-    const r = await fetch(new URL('index.json', base), { cache: 'no-cache' });
+    const r = await fetch(new URL('index.json', base), { cache: 'no-cache', signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const idx = await r.json() as { files: Record<string, { name: string; size: number; sha256: string }> };
     const files: Files = {};
@@ -84,7 +84,7 @@ async function pairFiles(from: string, to: string): Promise<Files | null> {
   const local = await localPairFiles(from, to);
   if (local) return local;
   let r: Response;
-  try { r = await fetch(`${MIRROR.replace('huggingface.co/', 'huggingface.co/api/models/')}/tree/main/${from}-${to}`, { credentials: 'omit' }); }
+  try { r = await fetch(`${MIRROR.replace('huggingface.co/', 'huggingface.co/api/models/')}/tree/main/${from}-${to}`, { credentials: 'omit', signal: AbortSignal.timeout(20000) }); }
   catch (e) { throw new Error(OFFLINE, { cause: e }); }
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(OFFLINE);
@@ -105,6 +105,8 @@ async function pairFiles(from: string, to: string): Promise<Files | null> {
 
 /** Avanzamento dei download (byte scaricati / totali), per i messaggi d'attesa. */
 let onBytes: ((done: number, total: number) => void) | null = null;
+/** Messaggi delle fasi di preparazione (per capire dove si ferma, se si ferma). */
+let stage: (m: string) => void = () => {};
 
 class DocVersoBacking extends TranslatorBacking {
   private pairs: string[];
@@ -117,6 +119,7 @@ class DocVersoBacking extends TranslatorBacking {
       const [from, to] = p.split('-');
       const files = await pairFiles(from, to);
       if (files) out.push({ from, to, files });
+      stage(files && files.model.name.startsWith(location.origin) ? 'Modello trovato nel pacchetto, caricamento…' : 'Modello trovato online, download…');
     }
     return out;
   }
@@ -127,7 +130,7 @@ class DocVersoBacking extends TranslatorBacking {
     try { cache = await caches.open(CACHE); } catch { /* cache non disponibile (finestra privata) */ }
     if (url.startsWith(location.origin)) cache = null; // modelli del pacchetto: già sul disco
     const hit = await cache?.match(url);
-    if (hit) return hit.arrayBuffer();
+    if (hit) { stage('Avvio del traduttore (alcuni secondi)…'); return hit.arrayBuffer(); }
     const res = await fetch(url, { credentials: 'omit', integrity: checksum ? `sha256-${this.hexToBase64(checksum)}` : undefined });
     if (!res.ok) throw new Error(`download non riuscito (${res.status})`);
     const total = Number(res.headers.get('content-length')) || 0;
@@ -143,6 +146,7 @@ class DocVersoBacking extends TranslatorBacking {
     const buf = new Uint8Array(done);
     let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
     try { await cache?.put(url, new Response(buf.slice().buffer)); } catch { /* spazio esaurito: si riscaricherà */ }
+    stage('Avvio del traduttore (alcuni secondi)…');
     return buf.buffer;
   }
 }
@@ -174,13 +178,15 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     }
     if (src === to) throw new Error(`Il documento è già in ${languageName(to).toLowerCase()}.`);
     onBytes = (d, t) => status(t > 0 && d >= t ? `Caricamento del modello ${languageName(src)} → ${languageName(to)}…` :`Scarico il modello ${languageName(src)} → ${languageName(to)} (solo la prima volta): ${Math.round(d / 1048576)}${t ? ` di ${Math.round(t / 1048576)}` : ''} MB`);
+    stage = (m: string) => status(m);
+    status(`Ricerca del modello ${languageName(src)} → ${languageName(to)}…`);
     const tr = getTranslator(src, to);
     let done = 0;
-    status(`Traduzione ${languageName(src)} → ${languageName(to)}…`);
     try {
       return await Promise.all(texts.map(text =>
         tr.translate({ from: src, to, text, html: false }).then(r => {
           done++; progress?.(done, texts.length);
+          if (done === 1) status(`Traduzione ${languageName(src)} → ${languageName(to)}: ${texts.length} frasi…`);
           return r.target.text;
         })));
     } catch (e) {
