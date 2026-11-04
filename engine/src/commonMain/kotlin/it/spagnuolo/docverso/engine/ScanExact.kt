@@ -141,7 +141,7 @@ object ScanExact {
                         if (dd) last = k
                         k++
                     }
-                    if (last - i + 1 >= minLen) runs += Run(i, last, p)
+                    if (last - i + 1 >= minLen / 2) runs += Run(i, last, p)
                     i = last + 1
                 }
             }
@@ -186,7 +186,39 @@ object ScanExact {
             }
         }
         collect(true); collect(false)
-        return out
+        return joinCollinear(out, minH, minV)
+    }
+
+    /**
+     * Pezzi di linea quasi allineati (foto di documenti: linee un po' curve o in prospettiva) uniti in una linea sola;
+     * poi via i pezzi rimasti troppo corti.
+     */
+    private fun joinCollinear(parts: List<ExactLayout.Box>, minH: Int, minV: Int): List<ExactLayout.Box> {
+        fun join(list: List<ExactLayout.Box>, horizontal: Boolean, minLen: Int): List<ExactLayout.Box> {
+            val pos = { b: ExactLayout.Box -> if (horizontal) (b.t + b.b) / 2f else (b.l + b.r) / 2f }
+            val a0 = { b: ExactLayout.Box -> if (horizontal) b.l else b.t }
+            val a1 = { b: ExactLayout.Box -> if (horizontal) b.r else b.b }
+            val cur = list.sortedBy { a0(it) }.toMutableList()
+            var changed = true
+            while (changed) {
+                changed = false
+                val res = ArrayList<ExactLayout.Box>()
+                for (b in cur) {
+                    val k = res.indexOfFirst { o -> abs(pos(o) - pos(b)) <= 5f && a0(b) - a1(o) <= 14f && a0(o) - a1(b) <= 14f }
+                    if (k < 0) { res += b; continue }
+                    val o = res[k]
+                    val n = ExactLayout.Box(min(o.l, b.l), min(o.t, b.t), max(o.r, b.r), max(o.b, b.b), o.color)
+                    // Lo spessore resta quello di un pezzo (la deriva verticale non è spessore)
+                    val th = max(if (horizontal) o.b - o.t else o.r - o.l, if (horizontal) b.b - b.t else b.r - b.l)
+                    val c = (pos(o) * (a1(o) - a0(o)) + pos(b) * (a1(b) - a0(b))) / (a1(o) - a0(o) + a1(b) - a0(b))
+                    res[k] = if (horizontal) ExactLayout.Box(n.l, c - th / 2f, n.r, c + th / 2f, o.color) else ExactLayout.Box(c - th / 2f, n.t, c + th / 2f, n.b, o.color)
+                    changed = true
+                }
+                cur.clear(); cur += res.sortedBy { a0(it) }
+            }
+            return cur.filter { a1(it) - a0(it) >= minLen }
+        }
+        return join(parts.filter { it.w >= it.h }, true, minH) + join(parts.filter { it.h > it.w }, false, minV)
     }
 
     /** Zone colorate chiare e uniformi (intestazioni di tabella, fasce): riquadri in pixel con il loro colore. */
@@ -323,11 +355,14 @@ object ScanExact {
             if (it.r <= it.l || it.b <= it.t || it.text.isBlank()) continue
             val ink = inkFraction(it.l, it.t, it.r, it.b)
             val ww = it.r - it.l; val hh = it.b - it.t
+            // Frammenti corti letti con poca sicurezza (puntini, macchie, caselle mal lette): non sono testo
+            if (it.confidence < 55f && it.text.count { c -> c.isLetterOrDigit() } <= 3) continue
             val small = ww < medH * 0.6f && hh < medH * 0.6f && ww / hh in 0.6f..1.6f
             if (ink >= 0.55f && small && it.text.length <= 2) { good += OcrWord("•", it.l, it.t, it.r, it.b, it.line, it.base); continue }
             // Macchia (foto, logo, codice a barre letti come testo): zona molto piena letta con poca sicurezza,
             // o "parola" senza lettere né cifre. Le parole lette con sicurezza restano anche se in grassetto.
-            if ((ink >= 0.6f && it.confidence < 80f) || ink >= 0.85f || (ink >= 0.5f && it.text.none { c -> c.isLetterOrDigit() })) continue
+            val letters = it.text.count { c -> c.isLetterOrDigit() }
+            if ((ink >= 0.6f && it.confidence < 80f && letters <= 3) || ink >= 0.85f || (ink >= 0.5f && letters == 0)) continue
             good += it
         }
         // Pallino letto come "e", "°", "*"… all'inizio di una riga, staccato dal resto
@@ -377,8 +412,8 @@ object ScanExact {
         note("tolte come macchie: " + words.filter { wd -> good.none { g -> g.l == wd.l && g.t == wd.t } }.joinToString(" ") { it.text })
 
         // Caselle stampate: quelle lette dall'OCR come "o", "0", "[]"… diventano ☐
-        val boxes = checkboxes(w, h, px, max(8, (4.5f / s).toInt()), max(14, (16f / s).toInt()))
-        val boxLike = Regex("^[oO0Q°DdUuCc\\[\\]{}()|m口□☐ロ]{1,3}$")
+        val boxes = checkboxes(w, h, px, max(7, (3f / s).toInt()), max(14, (16f / s).toInt()))
+        val boxLike = Regex("^[oO0Q°DdUuCcaeg©®\\[\\]{}()|m口□☐ロ]{1,3}$")
         val onBox = HashSet<OcrWord>()
         for (wd in text) if (boxLike.matches(wd.text) && boxes.any { c ->
                 val ow = min(c.r, wd.r) - max(c.l, wd.l); val oh = min(c.b, wd.b) - max(c.t, wd.t)

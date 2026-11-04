@@ -78,6 +78,8 @@ export interface PdfToWordOptions {
   title?: string;
   progress?: Progress;
   maxPages?: number;
+  /** Ricostruzione delle pagine scansionate: esatta (predefinita) o a flusso. */
+  scanMode?: 'exact' | 'flow';
 }
 
 /** Risoluzione dei ritagli: 3 = circa 216 dpi, abbastanza nitidi per i codici a barre. */
@@ -115,7 +117,7 @@ export async function pdfToWord(pdf: PDFDocumentProxy, opt: PdfToWordOptions): P
     } else {
       opt.progress?.(n - 1, total, `Pagina ${n} di ${total}: riconoscimento del testo`);
       const raster = await opt.platform.render(page, OCR_SCALE);
-      await addScanPage(builder, raster, opt.platform, opt.ocr);
+      await addScanPage(builder, raster, opt.platform, opt.ocr, opt.scanMode);
       raster.release();
     }
     page.cleanup();

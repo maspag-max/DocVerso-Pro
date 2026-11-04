@@ -48,7 +48,7 @@ if (/\.pdf$/i.test(input)) {
     data: new Uint8Array(readFileSync(input)), fontExtraProperties: true,
     standardFontDataUrl: root + 'standard_fonts/', cMapUrl: root + 'cmaps/', cMapPacked: true,
   }).promise;
-  docx = await pdfToWord(pdf, { platform: nodePlatform, OPS: pdfjs.OPS as any, ocr, translate: fake, title: 'Prova', progress });
+  docx = await pdfToWord(pdf, { platform: nodePlatform, OPS: pdfjs.OPS as any, ocr, translate: fake, title: 'Prova', progress, scanMode: flags.includes('--flow') ? 'flow' : 'exact' });
 } else {
   // Immagine: come "Immagini → Word" della web app
   const im = await loadImage(readFileSync(input));

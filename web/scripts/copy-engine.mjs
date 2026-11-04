@@ -24,3 +24,10 @@ for (const f of readdirSync(new URL('tesseract.js-core/', nm))) if (f.includes('
 for (const l of ['ita', 'eng', 'fra', 'deu', 'spa', 'por'])
   cpSync(new URL(`@tesseract.js-data/${l}/4.0.0_best_int/${l}.traineddata.gz`, nm), new URL(`lang/${l}.traineddata.gz`, tess));
 console.log('OCR copiato in public/tesseract');
+
+// Traduzione (Bergamot): lavoratore e motore WebAssembly serviti dall'app; i modelli si scaricano a parte
+const berg = new URL('../public/bergamot/', import.meta.url);
+mkdirSync(berg, { recursive: true });
+for (const f of ['translator-worker.js', 'bergamot-translator-worker.js', 'bergamot-translator-worker.wasm'])
+  cpSync(new URL('@mkljczk/bergamot-translator/worker/' + f, nm), new URL(f, berg));
+console.log('Traduzione copiata in public/bergamot');

@@ -29,8 +29,10 @@ export function wordsFrom(blocks: TBlock[] | null | undefined, minConfidence = 3
     const line = bi * 10000 + pi * 100 + li;
     const bl = l.baseline;
     for (const w of l.words) {
-      // Barre verticali attaccate alla parola (bordo di cella letto come testo)
-      const text = w.text.trim().replace(/^[|¦]+|[|¦]+$/g, '').trim();
+      // Barre verticali attaccate alla parola (bordo di cella letto come testo); virgolette spurie davanti a una
+      // parola letta con poca sicurezza (il bordo sinistro della cella attaccato alla prima lettera)
+      let text = w.text.trim().replace(/^[|¦]+|[|¦]+$/g, '').trim();
+      if (w.confidence < 75 && /^["'‘’“”`]\p{Lu}\p{Ll}{2,}/u.test(text) && !/["'‘’“”]$/.test(text)) text = text.slice(1);
       if (!text || w.confidence < minConfidence) continue;
       if (NOISE.test(text) && (text.length > 1 ? w.confidence < 80 : !/^[-–—]$/.test(text) || w.confidence < 60)) continue;
       const cx = (w.bbox.x0 + w.bbox.x1) / 2;
