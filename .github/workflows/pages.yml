@@ -42,12 +42,22 @@ jobs:
           npm ci
           npm run build
 
+      - name: Pacchetto per l'uso in locale (DocVerso.bat)
+        working-directory: web
+        run: npm run pacchetto
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DocVerso-locale
+          path: web/DocVerso-locale.zip
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
 
   deploy:
     needs: build
+    continue-on-error: true # finché GitHub Pages non è attivo resta solo il pacchetto locale
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -6,6 +6,11 @@ Deriva dalle app Android [ScanDoc](https://github.com/maspag-max/ScanDoc) e [Tra
 
 Indirizzo (dopo l'attivazione di GitHub Pages): https://maspag-max.github.io/DocVerso/
 
+## Uso in locale, senza GitHub
+Scarica `DocVerso-locale.zip` (pagina Actions del repository, ultima esecuzione, sezione Artifacts),
+estrai la cartella e fai doppio clic su `DocVerso.bat`: un piccolo server PowerShell (già presente in
+Windows, senza diritti di amministratore) serve l'app su http://localhost:8765 e la apre nel browser.
+
 ## Funzioni (prima versione)
 - PDF → Word fedele (tabelle dalle linee, testo in posizione, immagini e codici a barre ancorati), con o senza traduzione
 - Word → Word tradotto (impaginazione intatta)

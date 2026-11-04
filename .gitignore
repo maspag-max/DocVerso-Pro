@@ -11,3 +11,4 @@ local.properties
 web/public/pdfjs/
 web/public/tesseract/
 web/public/bergamot/
+web/DocVerso-locale.zip

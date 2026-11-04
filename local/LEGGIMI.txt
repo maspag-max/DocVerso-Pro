@@ -1,0 +1,22 @@
+DocVerso in locale
+==================
+
+Come si usa
+1. Estrai tutta la cartella DocVerso dove vuoi (per esempio C:\DocVerso).
+2. Fai doppio clic su DocVerso.bat: si apre una finestra nera e DocVerso nel browser.
+3. Lascia aperta la finestra nera mentre usi DocVerso; chiudila quando hai finito.
+
+Cosa resta sul computer
+- I documenti non escono mai dal computer: lettura, conversione, riconoscimento del testo e
+  traduzione avvengono nel browser.
+- Serve internet solo la prima volta che traduci in una lingua, per scaricare il modello di
+  traduzione (circa 35 MB per lingua, verificato con le impronte ufficiali di Mozilla).
+  Dopo resta nella cache del browser e la traduzione funziona anche senza rete.
+
+Se non parte
+- Se Windows mostra "PC protetto da Windows", scegli "Ulteriori informazioni" e poi "Esegui comunque".
+- Il server usa l'indirizzo http://localhost:8765 (o una delle porte successive se è occupata):
+  è raggiungibile solo da questo computer.
+- Usa Chrome o Edge aggiornati.
+
+Realizzata da Massimo Spagnuolo
