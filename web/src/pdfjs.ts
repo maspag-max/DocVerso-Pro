@@ -1,6 +1,8 @@
 /** pdf.js nel browser: lavoratore separato e risorse servite dall'app stessa (nessuna richiesta esterna). */
-import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// Versione "legacy" di pdf.js: funziona anche con Chrome/Edge non aggiornatissimi (la versione moderna
+// usa funzioni del 2025, come Uint8Array.toHex, che i browser più vecchi non hanno)
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
