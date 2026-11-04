@@ -103,7 +103,9 @@ object ExactLayout {
         val mL = (xs.minOrNull() ?: 56f).coerceIn(0f, 56f).let { kotlin.math.floor(it) }
         val mR = (page.w - (xr.maxOrNull() ?: (page.w - 56f)) - 1f).coerceIn(0f, 56f)
         val mT = ((ys.minOrNull() ?: 56f) - 2f).coerceIn(0f, 56f)
-        val mB = (page.h - (yb.maxOrNull() ?: (page.h - 56f)) - 4f).coerceIn(0f, 56f)
+        // Margine inferiore minimo: le posizioni si misurano dall'alto, quindi non sposta nulla, ma lascia spazio
+        // di riserva se Word impagina una riga in più (altrimenti finirebbe nella colonna o nella pagina dopo)
+        val mB = (page.h - (yb.maxOrNull() ?: (page.h - 56f)) - 4f).coerceIn(0f, 6f)
         val textR = page.w - mR
 
         // --- Colonne: pagine a due colonne (articoli, riviste) → vere colonne Word, una zona per volta

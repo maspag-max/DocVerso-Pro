@@ -141,7 +141,8 @@ object ScanExact {
                         if (dd) last = k
                         k++
                     }
-                    if (last - i + 1 >= minLen / 2) runs += Run(i, last, p)
+                    // Linee orizzontali anche a pezzi (foto); verticali solo intere: le aste delle lettere non sono linee
+                    if (last - i + 1 >= (if (horizontal) minLen / 2 else minLen)) runs += Run(i, last, p)
                     i = last + 1
                 }
             }
@@ -204,7 +205,8 @@ object ScanExact {
                 changed = false
                 val res = ArrayList<ExactLayout.Box>()
                 for (b in cur) {
-                    val k = res.indexOfFirst { o -> abs(pos(o) - pos(b)) <= 5f && a0(b) - a1(o) <= 14f && a0(o) - a1(b) <= 14f }
+                    val gapMax = if (horizontal) 14f else 4f
+                    val k = res.indexOfFirst { o -> abs(pos(o) - pos(b)) <= 5f && a0(b) - a1(o) <= gapMax && a0(o) - a1(b) <= gapMax }
                     if (k < 0) { res += b; continue }
                     val o = res[k]
                     val n = ExactLayout.Box(min(o.l, b.l), min(o.t, b.t), max(o.r, b.r), max(o.b, b.b), o.color)
