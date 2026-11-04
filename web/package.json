@@ -8,7 +8,8 @@
     "dev": "npm run engine && vite",
     "build": "npm run engine && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pacchetto": "node scripts/package-local.mjs"
+    "pacchetto": "node scripts/fetch-models.mjs && node scripts/package-local.mjs",
+    "modelli": "node scripts/fetch-models.mjs"
   },
   "dependencies": {
     "@fontsource-variable/recursive": "^5.3.0",

@@ -9,9 +9,10 @@ Come si usa
 Cosa resta sul computer
 - I documenti non escono mai dal computer: lettura, conversione, riconoscimento del testo e
   traduzione avvengono nel browser.
-- Serve internet solo la prima volta che traduci in una lingua, per scaricare il modello di
-  traduzione (circa 35 MB per lingua, verificato con le impronte ufficiali di Mozilla).
-  Dopo resta nella cache del browser e la traduzione funziona anche senza rete.
+- La traduzione inglese <-> italiano funziona senza internet: i modelli sono nella cartella
+  app\modelli (Firefox Translations di Mozilla, verificati con le impronte ufficiali).
+- Per le altre lingue serve internet la prima volta (circa 35 MB per lingua); dopo il modello
+  resta nella cache del browser. Alcune reti aziendali bloccano questo download.
 
 Se non parte
 - Se Windows mostra "PC protetto da Windows", scegli "Ulteriori informazioni" e poi "Esegui comunque".

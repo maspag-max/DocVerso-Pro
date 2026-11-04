@@ -12,7 +12,12 @@ if (!existsSync(join(dist, 'index.html'))) { console.error('Prima: npm run build
 const files = {};
 const walk = d => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else files['DocVerso/app/' + relative(dist, p).split('\\').join('/')] = readFileSync(p); } };
 walk(dist);
+// Modelli di traduzione inglese ↔ italiano (preparati con: node scripts/fetch-models.mjs)
+const models = join(web, 'models-cache');
+if (existsSync(models)) for (const pair of readdirSync(models)) for (const f of readdirSync(join(models, pair)))
+  files[`DocVerso/app/modelli/${pair}/${f}`] = readFileSync(join(models, pair, f));
+else console.warn('Attenzione: senza modelli di traduzione (node scripts/fetch-models.mjs)');
 for (const f of ['DocVerso.bat', 'server.ps1', 'LEGGIMI.txt']) files['DocVerso/' + f] = readFileSync(join(local, f));
 const out = process.argv[2] ?? join(web, 'DocVerso-locale.zip');
-writeFileSync(out, zipSync(files, { level: 6 }));
+writeFileSync(out, zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, k.includes('/modelli/') ? [v, { level: 1 }] : v])), { level: 6 }));
 console.log(`${out}: ${Object.keys(files).length} file, ${(statSync(out).size / 1048576).toFixed(1)} MB`);

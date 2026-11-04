@@ -17,6 +17,7 @@ export const translationAvailable = true;
 const MIRROR = 'https://huggingface.co/midudev/firefox-translations';
 const MOZILLA_RECORDS = 'https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/translations-models/records';
 const CACHE = 'docverso-modelli-traduzione';
+const OFFLINE = 'Non riesco a scaricare il modello di traduzione per queste lingue: serve internet, e alcune reti aziendali bloccano il sito dei modelli. Inglese ↔ italiano funziona senza internet con il pacchetto DocVerso aggiornato.';
 
 export interface Lang { code: string; name: string }
 
@@ -56,15 +57,37 @@ function officialHashes(): Promise<Set<string>> {
   mozillaHashes ??= fetch(MOZILLA_RECORDS, { credentials: 'omit' })
     .then(r => { if (!r.ok) throw new Error(); return r.json(); })
     .then(j => new Set<string>((j.data as any[]).map(r => r.attachment?.hash).filter(Boolean)))
-    .catch(e => { mozillaHashes = null; throw new Error('Non riesco a leggere l’elenco dei modelli di traduzione di Mozilla: serve internet la prima volta che si usa una lingua.', { cause: e }); });
+    .catch(e => { mozillaHashes = null; throw new Error(OFFLINE, { cause: e }); });
   return mozillaHashes;
 }
 
-/** File di una coppia di lingue sulla copia, controllati contro l'elenco ufficiale di Mozilla. */
+/**
+ * Modelli inclusi nel pacchetto locale (cartella "modelli" accanto all'app): verificati quando il
+ * pacchetto è stato preparato, funzionano senza internet e dietro i proxy aziendali.
+ */
+async function localPairFiles(from: string, to: string): Promise<Files | null> {
+  try {
+    const base = new URL(`${import.meta.env.BASE_URL}modelli/${from}-${to}/`, location.href);
+    const r = await fetch(new URL('index.json', base), { cache: 'no-cache' });
+    if (!r.ok) return null;
+    const idx = await r.json() as { files: Record<string, { name: string; size: number; sha256: string }> };
+    const files: Files = {};
+    for (const [kind, f] of Object.entries(idx.files)) files[kind] = { name: new URL(f.name, base).href, size: f.size, expectedSha256Hash: f.sha256 };
+    return files.model && files.lex && (files.vocab || (files.srcvocab && files.trgvocab)) ? files : null;
+  } catch {
+    return null;
+  }
+}
+
+/** File di una coppia di lingue: prima quelli del pacchetto, poi la copia online controllata con l'elenco di Mozilla. */
 async function pairFiles(from: string, to: string): Promise<Files | null> {
-  const r = await fetch(`${MIRROR.replace('huggingface.co/', 'huggingface.co/api/models/')}/tree/main/${from}-${to}`, { credentials: 'omit' });
+  const local = await localPairFiles(from, to);
+  if (local) return local;
+  let r: Response;
+  try { r = await fetch(`${MIRROR.replace('huggingface.co/', 'huggingface.co/api/models/')}/tree/main/${from}-${to}`, { credentials: 'omit' }); }
+  catch (e) { throw new Error(OFFLINE, { cause: e }); }
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error('Non riesco a raggiungere i modelli di traduzione: controlla la connessione a internet.');
+  if (!r.ok) throw new Error(OFFLINE);
   const list = await r.json() as { path: string; size: number; lfs?: { oid: string } }[];
   const official = await officialHashes();
   const files: Files = {};
@@ -102,6 +125,7 @@ class DocVersoBacking extends TranslatorBacking {
   async fetch(url: string, checksum: string | undefined): Promise<ArrayBuffer> {
     let cache: Cache | null = null;
     try { cache = await caches.open(CACHE); } catch { /* cache non disponibile (finestra privata) */ }
+    if (url.startsWith(location.origin)) cache = null; // modelli del pacchetto: già sul disco
     const hit = await cache?.match(url);
     if (hit) return hit.arrayBuffer();
     const res = await fetch(url, { credentials: 'omit', integrity: checksum ? `sha256-${this.hexToBase64(checksum)}` : undefined });
@@ -149,7 +173,7 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
       src = d;
     }
     if (src === to) throw new Error(`Il documento è già in ${languageName(to).toLowerCase()}.`);
-    onBytes = (d, t) => status(`Scarico il modello ${languageName(src)} → ${languageName(to)} (solo la prima volta): ${Math.round(d / 1048576)}${t ? ` di ${Math.round(t / 1048576)}` : ''} MB`);
+    onBytes = (d, t) => status(t > 0 && d >= t ? `Caricamento del modello ${languageName(src)} → ${languageName(to)}…` :`Scarico il modello ${languageName(src)} → ${languageName(to)} (solo la prima volta): ${Math.round(d / 1048576)}${t ? ` di ${Math.round(t / 1048576)}` : ''} MB`);
     const tr = getTranslator(src, to);
     let done = 0;
     status(`Traduzione ${languageName(src)} → ${languageName(to)}…`);
@@ -163,8 +187,7 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
       // Errore (di solito la rete): il prossimo tentativo riparte da zero
       translator?.delete(); translator = null; loadedPairs = '';
       const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(/Could not fetch|Failed to fetch|NetworkError|download/i.test(msg)
-        ? 'Non sono riuscito a scaricare il modello di traduzione: controlla la connessione a internet e riprova.' : msg, { cause: e });
+      throw new Error(/Could not fetch|Failed to fetch|NetworkError|download/i.test(msg) ? OFFLINE : msg, { cause: e });
     } finally {
       onBytes = null;
     }
