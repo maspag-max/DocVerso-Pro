@@ -41,6 +41,9 @@ object ExactLayout {
 
     private const val THIN = 2.5f
 
+    /** Lettere sottolineate nella pagina in costruzione (linee subito sotto il testo). */
+    private val underlined = HashSet<Glyph>()
+
     /**
      * [crop] ritaglia una zona della pagina disegnata e la restituisce in PNG o JPEG (null se non disponibile).
      * [cropErasing] (facoltativo) ritaglia una zona cancellando le lettere che ci stanno sopra (riquadri dati):
@@ -73,18 +76,28 @@ object ExactLayout {
             val erase = inside.map { w -> Box(w.l - 0.8f, w.base - w.size * 0.95f, w.r + 0.8f, w.base + w.size * 0.25f) }
             cropErasing?.invoke(c, erase)?.let { anchors += DocItem.Anchor(it, isPng(it), c.l, c.t, c.w, c.h, behind = true) }
         }
+        // Figure e foto: candidate a stare nel testo (vedi più sotto), le altre restano ancorate alla pagina
+        val pictures = ArrayList<DocItem.Anchor>()
         for (a in artBoxes) {
             val c = pad(a, 0.5f, page)
-            crop(c)?.let { anchors += DocItem.Anchor(it, isPng(it), c.l, c.t, c.w, c.h, behind = false) }
+            crop(c)?.let { pictures += DocItem.Anchor(it, isPng(it), c.l, c.t, c.w, c.h, behind = false) }
         }
-        for (p in page.pics) anchors += DocItem.Anchor(p.jpeg, false, p.l, p.t, p.r - p.l, p.b - p.t, behind = p.behind)
+        for (p in page.pics) pictures += DocItem.Anchor(p.jpeg, false, p.l, p.t, p.r - p.l, p.b - p.t, behind = p.behind)
 
         // --- Griglie (tabelle) dalle linee che si toccano
+        underlined.clear()
         val grids = ArrayList<GridShape>()
         for (group in groupRules(rules)) {
             val g = gridOf(group)
             if (g != null && text.any { g.contains(it) }) grids += g
-            else group.forEach { anchors += solid(it, behind = false) }
+            else group.forEach { r ->
+                // Linea subito sotto il testo (link, parola sottolineata): diventa sottolineatura del testo,
+                // così segue il testo invece di restare ferma sulla pagina
+                val under = if (r.w >= r.h && r.h <= 1.5f) text.filter { w -> w.base in (r.t - 3f)..(r.t + 0.6f) && w.r > r.l + 0.5f && w.l < r.r - 0.5f } else emptyList()
+                if (under.isNotEmpty() && under.minOf { it.l } >= r.l - 3f && under.maxOf { it.r } <= r.r + 3f) {
+                    under.forEach { w -> w.glyphs.filter { g -> g.x + g.w / 2f in r.l..r.r }.forEach { underlined += it } }
+                } else anchors += solid(r, behind = false)
+            }
         }
 
         // Sfondi che stanno dentro una tabella: diventano sfondi di cella (si spostano con la tabella)
@@ -110,16 +123,39 @@ object ExactLayout {
 
         // --- Colonne: pagine a due colonne (articoli, riviste) → vere colonne Word, una zona per volta
         val split = columnSplit(free, grids, page.w)
+        // Figure con una fascia tutta per sé (nessuna riga di testo accanto, nella stessa colonna) vanno nel
+        // testo: se il testo si allunga (traduzione) la figura scende con lui invece di finirci sotto.
+        // Le altre (loghi accanto al testo, codici a barre, immagini di sfondo) restano ferme sulla pagina.
+        val gxs = split?.gx
+        fun sideOf(l: Float, r: Float): Int = if (gxs == null) 0 else if (r <= gxs + 2f) -1 else if (l >= gxs - 2f) 1 else 0
+        // Immagini affiancate o attaccate (figure fatte di più foto) restano ferme: insieme non si possono mettere nel testo
+        fun near(a: DocItem.Anchor, b: DocItem.Anchor) = a.x < b.x + b.w + 8f && b.x < a.x + a.w + 8f && a.y < b.y + b.h + 8f && b.y < a.y + a.h + 8f
+        val inline = pictures.filter { a ->
+            if (a.behind || a.w < 20f || a.h < 12f) return@filter false
+            if (pictures.any { b -> b !== a && !b.behind && near(a, b) }) return@filter false
+            val side = sideOf(a.x, a.x + a.w)
+            lines.none { ln -> ln.top < a.y + a.h - 1f && ln.bottom > a.y + 1f && (gxs == null || sideOf(ln.l, ln.r) == side || sideOf(ln.l, ln.r) == 0) && ln.l < a.x + a.w + 40f && ln.r > a.x - 40f } &&
+                grids.none { g -> g.ys.first() < a.y + a.h && g.ys.last() > a.y && g.xs.first() < a.x + a.w && g.xs.last() > a.x }
+        }
+        pictures.filter { it !in inline }.forEach { anchors += it }
         val blocks = ArrayList<DocItem.Block>()
         if (split == null) {
-            blocks += flow(itemsOf(lines, grids), mL, textR, mT, page.w / 2f, text, page.fonts, inGrid).first
+            blocks += flow(itemsOf(lines, grids, inline), mL, textR, mT, page.w / 2f, text, page.fonts, inGrid).first
             if (blocks.isEmpty() || blocks.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
         } else {
             var cursor = mT
-            for (z in zonesOf(split, free, grids)) {
+            val zones = zonesOf(split, free, grids)
+            // Ogni figura va nella fascia in cui cade il suo centro (dall'inizio della fascia all'inizio della successiva)
+            val zoneTops = zones.map { z -> (z.left.map { it.top } + (z.right ?: emptyList()).map { it.top } + z.grids.map { it.ys.first() }).minOrNull() ?: 0f }
+            fun picsOf(k: Int) = inline.filter { a ->
+                val cy = a.y + a.h / 2f
+                (k == 0 || cy >= zoneTops[k]) && (k == zones.size - 1 || cy < zoneTops[k + 1])
+            }
+            for ((zk, z) in zones.withIndex()) {
+                val zp = picsOf(zk)
                 if (z.right == null) {
                     // Zona a una colonna (titolo, tabella o figura larga)
-                    val (bs, end) = flow(itemsOf(lines(z.left), z.grids), mL, textR, cursor, page.w / 2f, text, page.fonts, inGrid)
+                    val (bs, end) = flow(itemsOf(lines(z.left), z.grids, zp), mL, textR, cursor, page.w / 2f, text, page.fonts, inGrid)
                     blocks += bs
                     if (bs.isEmpty() || bs.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
                     blocks += DocItem.SectionMark(emptyList(), emptyList())
@@ -134,12 +170,13 @@ object ExactLayout {
                     // Lo spazio vuoto prima delle colonne va nella fascia precedente: così entrambe le colonne
                     // cominciano in cima alla loro sezione (Word e LibreOffice trattano diversamente lo spazio
                     // prima del primo paragrafo di una colonna)
-                    val firstTop = (leftLines.map { it.top } + rightLines.map { it.top } + z.grids.map { it.ys.first() }).minOrNull() ?: cursor
+                    val lPics = zp.filter { it.x + it.w / 2f < split.gx }; val rPics = zp.filter { it.x + it.w / 2f >= split.gx }
+                    val firstTop = (leftLines.map { it.top } + rightLines.map { it.top } + z.grids.map { it.ys.first() } + zp.map { it.y }).minOrNull() ?: cursor
                     val gap = (firstTop - cursor - 3f).coerceAtLeast(0f)
                     val markAt = blocks.indexOfLast { it is DocItem.SectionMark }
                     if (gap > 0.5f && markAt >= 0) { blocks.add(markAt, DocItem.Para(emptyList(), 0f, gap)); cursor += gap }
-                    val (lb, le) = flow(itemsOf(leftLines, lGrids), colL, colLR, cursor, (colL + colLR) / 2f, text, page.fonts, inGrid)
-                    val (rb, re) = flow(itemsOf(rightLines, rGrids), colRL, textR, cursor, (colRL + textR) / 2f, text, page.fonts, inGrid)
+                    val (lb, le) = flow(itemsOf(leftLines, lGrids, lPics), colL, colLR, cursor, (colL + colLR) / 2f, text, page.fonts, inGrid)
+                    val (rb, re) = flow(itemsOf(rightLines, rGrids, rPics), colRL, textR, cursor, (colRL + textR) / 2f, text, page.fonts, inGrid)
                     blocks += lb
                     if (lb.isEmpty() || lb.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
                     blocks += DocItem.ColumnBreak
@@ -153,10 +190,10 @@ object ExactLayout {
         return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors)
     }
 
-    private class Item(val top: Float, val line: TLine? = null, val grid: GridShape? = null)
+    private class Item(val top: Float, val line: TLine? = null, val grid: GridShape? = null, val pic: DocItem.Anchor? = null)
 
-    private fun itemsOf(lines: List<TLine>, grids: List<GridShape>) =
-        (lines.map { Item(it.top, line = it) } + grids.map { Item(it.ys.first(), grid = it) }).sortedBy { it.top }
+    private fun itemsOf(lines: List<TLine>, grids: List<GridShape>, pics: List<DocItem.Anchor> = emptyList()) =
+        (lines.map { Item(it.top, line = it) } + grids.map { Item(it.ys.first(), grid = it) } + pics.map { Item(it.y, pic = it) }).sortedBy { it.top }
 
     /**
      * Testo e tabelle di una colonna (o della pagina) nell'ordine verticale, fra [colL] e [colR], dal punto
@@ -172,6 +209,14 @@ object ExactLayout {
         var lastWasGrid = false
         while (i < items.size) {
             val it = items[i]
+            if (it.pic != null) {
+                val a = it.pic
+                blocks += DocItem.InlinePic(a.bytes, a.png, (a.x - colL).coerceAtLeast(0f), a.w, a.h, (a.y - cursor).coerceAtLeast(0f))
+                cursor = max(cursor, a.y) + a.h + 1f
+                lastWasGrid = false
+                i++
+                continue
+            }
             if (it.grid != null) {
                 val g = it.grid
                 val gap = g.ys.first() - cursor
@@ -198,14 +243,22 @@ object ExactLayout {
             // La prima riga può essere rientrata (rientro della prima riga), le altre allineate fra loro.
             val group = arrayListOf(line)
             val reach = { ln: TLine -> ln.r > colR - max(4f * ln.size, (colR - colL) * 0.12f) }
+            // Prima riga di un elenco: pallino (o numero) staccato dal testo, poi righe allineate al testo
+            val bullet = line.segs.size == 2 && line.segs[0].words.size == 1 && line.segs[0].words[0].text.length <= 3 &&
+                line.segs[1].l - line.segs[0].r < 6f * line.size
+            val firstBodyL = if (bullet) line.segs[1].l else line.l
             while (i + group.size < items.size) {
                 val nx = items[i + group.size].line ?: break
                 val pv = group.last()
                 val step = nx.base - pv.base
                 val sameStep = group.size < 2 || abs(step - (group[1].base - group[0].base)) < 0.6f
                 val bodyL = if (group.size >= 2) group[1].l else nx.l
-                val aligned = abs(nx.l - bodyL) < 2f && (group.size >= 2 || abs(nx.l - line.l) < 2f || (line.l - nx.l in 2f..(6f * line.size)))
-                val ok = pv.segs.size == 1 && nx.segs.size == 1 && aligned &&
+                // Prima riga rientrata, sporgente (rientro negativo) o allineata; nell'elenco, allineata al testo
+                val aligned = abs(nx.l - bodyL) < 2f && (group.size >= 2 || abs(nx.l - firstBodyL) < 2f || abs(line.l - nx.l) in 2f..(6f * line.size))
+                val pvOneSeg = pv.segs.size == 1 || (pv === line && bullet)
+                // Un titolo (grassetto/corsivo diverso dal testo che segue) non si fonde con il paragrafo
+                if (styleOf(pv, fonts) != styleOf(nx, fonts)) break
+                val ok = pvOneSeg && nx.segs.size == 1 && aligned &&
                     abs(nx.size - pv.size) < 0.6f && step > 0f && step < pv.size * 1.8f && sameStep && reach(pv)
                 if (!ok) break
                 group += nx
@@ -218,20 +271,31 @@ object ExactLayout {
             if (group.size > 1) {
                 val runs = ArrayList<DocItem.Run>()
                 group.forEachIndexed { k, ln ->
-                    val rs = ln.segs[0].runs(fonts, single = true)
+                    val rs = (if (k == 0 && bullet) ln.segs[1] else ln.segs[0]).runs(fonts, single = true)
                     if (k > 0 && runs.isNotEmpty()) {
                         val last = runs.removeAt(runs.size - 1)
-                        // A capo dopo un trattino d'unione: la parola si ricompone
-                        runs += if (last.text.endsWith("-") && last.text.length > 1 && !last.text.endsWith(" -")) last.copy(text = last.text.dropLast(1)) else last.copy(text = last.text + " ")
+                        // A capo dopo un trattino: la parola si ricompone tenendo il trattino ("non-closed"); i documenti
+                        // fatti con Word di solito non sillabano, quindi il trattino è quasi sempre una parola composta
+                        runs += if (last.text.endsWith("-") && last.text.length > 1 && !last.text.endsWith(" -")) last else last.copy(text = last.text + " ")
                     }
                     runs += rs
                 }
                 val bodyL = group[1].l
                 val colRight = group.dropLast(1).maxOf { it.r }
                 val justify = group.size > 2 && group.dropLast(1).all { abs(it.r - colRight) < 1.5f }
-                blocks += DocItem.Para(
+                // Margine destro con un po' di tolleranza: con caratteri di misure appena diverse l'ultima
+                // parola della riga non deve andare a capo (la parola dopo, intera, comunque non ci sta)
+                // Word usa corpi a mezzi punti: un 9,96 diventa 10 e la riga si allunga un poco; si compensa con
+                // un margine destro appena più largo (anche oltre la colonna, di pochi decimi di punto)
+                val grow = (roundSize(size) / size - 1f).coerceAtLeast(0f) * (colRight - bodyL) + 1f
+                val right = if (justify) -grow else (colR - colRight - max(0.8f * size, grow)).coerceAtLeast(-grow)
+                blocks += if (bullet) DocItem.Para(
+                    // Elenco: pallino, tabulazione, testo; le righe dopo allineate al testo (rientro sporgente)
+                    listOf(DocItem.Piece(bodyL - colL, line.segs[0].runs(fonts)), DocItem.Piece(bodyL - colL, mergeRuns(runs))), before, lineH,
+                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL,
+                ) else DocItem.Para(
                     listOf(DocItem.Piece(bodyL - colL, mergeRuns(runs))), before, lineH,
-                    rightPt = (colR - colRight).coerceAtLeast(0f), justify = justify, firstLinePt = line.l - bodyL,
+                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL,
                 )
             } else {
                 blocks += lineBlock(line, before, lineH, colL, colR, centerX, fonts)
@@ -241,6 +305,14 @@ object ExactLayout {
             i += group.size
         }
         return blocks to cursor
+    }
+
+    /** Stile prevalente di una riga: 0 normale, 1 grassetto, 2 corsivo, 3 grassetto corsivo. */
+    private fun styleOf(ln: TLine, fonts: List<Font>): Int {
+        val gs = ln.segs.flatMap { it.words }.flatMap { it.glyphs }
+        val b = gs.count { fonts.getOrNull(it.font)?.bold == true } * 2 > gs.size
+        val i = gs.count { fonts.getOrNull(it.font)?.italic == true } * 2 > gs.size
+        return (if (b) 1 else 0) + (if (i) 2 else 0)
     }
 
     // ---------------------------------------------------------------- colonne
@@ -413,9 +485,9 @@ object ExactLayout {
                 }
                 for (g in w.glyphs) {
                     val f = fonts.getOrNull(g.font)
-                    val run = DocItem.Run(g.ch, family(f?.name), roundSize(g.size), f?.bold == true, f?.italic == true, g.color)
+                    val run = DocItem.Run(g.ch, family(f?.name), roundSize(g.size), f?.bold == true, f?.italic == true, g.color, g in underlined)
                     val last = out.lastOrNull()
-                    if (last != null && last.font == run.font && last.sizePt == run.sizePt && last.bold == run.bold && last.italic == run.italic && last.color == run.color)
+                    if (last != null && last.font == run.font && last.sizePt == run.sizePt && last.bold == run.bold && last.italic == run.italic && last.color == run.color && last.underline == run.underline)
                         out[out.size - 1] = last.copy(text = last.text + g.ch)
                     else out += run
                 }
@@ -442,10 +514,14 @@ object ExactLayout {
         }
         return rows.map { row ->
             row.sortBy { it.l }
+            // Testo giustificato (colonne strette): gli spazi fra le parole sono larghi ma tutti simili;
+            // un pezzo di riga separato (modulo, tabulazione) ha uno spazio molto più largo degli altri
+            val gaps = row.zipWithNext { a, b -> b.l - a.r }.filter { it > 0f }.sorted()
+            val typical = if (gaps.size >= 3) 2.2f * gaps[gaps.size / 2] else 0f
             val segs = ArrayList<ArrayList<Word>>()
             for (w in row) {
                 val s = segs.lastOrNull()
-                if (s != null && w.l - s.last().r < max(1.2f * max(w.size, s.last().size), 6f)) s += w else segs += arrayListOf(w)
+                if (s != null && w.l - s.last().r < max(max(1.2f * max(w.size, s.last().size), 6f), typical)) s += w else segs += arrayListOf(w)
             }
             TLine(segs.map { Seg(it) })
         }
@@ -457,7 +533,7 @@ object ExactLayout {
         val out = ArrayList<DocItem.Run>()
         for (r in runs) {
             val last = out.lastOrNull()
-            if (last != null && last.font == r.font && last.sizePt == r.sizePt && last.bold == r.bold && last.italic == r.italic && last.color == r.color)
+            if (last != null && last.font == r.font && last.sizePt == r.sizePt && last.bold == r.bold && last.italic == r.italic && last.color == r.color && last.underline == r.underline)
                 out[out.size - 1] = last.copy(text = last.text + r.text)
             else out += r
         }

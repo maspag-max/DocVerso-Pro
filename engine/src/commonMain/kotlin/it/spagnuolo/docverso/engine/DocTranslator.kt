@@ -97,10 +97,10 @@ class DocTranslator(private val raw: (String) -> String) {
             val end = i == out.size || out[i] is DocItem.ColumnBreak || out[i] is DocItem.SectionMark
             if (!end) continue
             val idx = (from until i).filter { k -> (p.blocks[k] as? DocItem.Para)?.let { flowing(it, widths[k]) } == true }
-            val grown = idx.sumOf { width((out[it] as DocItem.Para).pieces[0].runs).toDouble() }
-            val orig = idx.sumOf { width((p.blocks[it] as DocItem.Para).pieces[0].runs).toDouble() }
+            val grown = idx.sumOf { width((out[it] as DocItem.Para).pieces.flatMap { p -> p.runs }).toDouble() }
+            val orig = idx.sumOf { width((p.blocks[it] as DocItem.Para).pieces.flatMap { p -> p.runs }).toDouble() }
             if (orig > 0 && grown > orig) {
-                val f = (1.0 / kotlin.math.sqrt(grown / orig)).toFloat().coerceIn(0.85f, 1f)
+                val f = (1.0 / kotlin.math.sqrt(grown / orig * 1.05)).toFloat().coerceIn(0.85f, 1f)
                 for (k in idx) {
                     val q = out[k] as DocItem.Para
                     out[k] = q.copy(
@@ -115,8 +115,14 @@ class DocTranslator(private val raw: (String) -> String) {
     }
 
     /** Paragrafo di testo che va a capo (più righe nell'originale), non un'etichetta o un pezzo di riga. */
-    private fun flowing(b: DocItem.Para, usable: Float): Boolean =
-        b.pieces.size == 1 && b.frame == null && b.align == DocItem.Align.LEFT && width(b.pieces[0].runs) > (usable - b.pieces[0].x - b.rightPt) * 1.15f
+    private fun flowing(b: DocItem.Para, usable: Float): Boolean {
+        if (b.frame != null || b.align != DocItem.Align.LEFT || b.pieces.isEmpty()) return false
+        // Un pezzo solo, o pallino/numero dell'elenco + testo
+        val listItem = b.pieces.size == 2 && b.pieces[0].runs.sumOf { it.text.trim().length } <= 3
+        if (b.pieces.size != 1 && !listItem) return false
+        val last = b.pieces.last()
+        return width(last.runs) > (usable - last.x - b.rightPt) * 1.15f
+    }
 
     private fun para(p: DocItem.Para): DocItem.Para =
         // Il testo tradotto può essere più lungo: le righe in posizione fissa diventano libere di andare a capo
@@ -222,7 +228,7 @@ class DocTranslator(private val raw: (String) -> String) {
             val rs = p.pieces[0].runs
             if (k > 0 && runs.isNotEmpty()) {
                 val last = runs.removeAt(runs.size - 1)
-                runs += if (last.text.endsWith("-") && last.text.length > 1) last.copy(text = last.text.dropLast(1)) else last.copy(text = last.text.trimEnd() + " ")
+                runs += if (last.text.endsWith("-") && last.text.length > 1) last else last.copy(text = last.text.trimEnd() + " ")
             }
             runs += rs
         }

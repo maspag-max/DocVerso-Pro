@@ -176,6 +176,7 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
             when (b) {
                 is DocItem.Para -> exactPara(b, if (i == 0) anchors.toString() else "")
                 is DocItem.Grid -> grid(b)
+                is DocItem.InlinePic -> inlinePic(b, if (i == 0) anchors.toString() else "")
                 is DocItem.ColumnBreak -> body.append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr><w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:br w:type=\"column\"/></w:r></w:p>")
                 is DocItem.SectionMark -> {
                     // La sezione si descrive alla sua fine: colonne della fascia appena finita
@@ -194,6 +195,7 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         r.font?.let { val f = escape(it); append("<w:rFonts w:ascii=\"$f\" w:hAnsi=\"$f\" w:cs=\"$f\" w:eastAsia=\"$f\"/>") }
         if (r.bold) append("<w:b/><w:bCs/>")
         if (r.italic) append("<w:i/><w:iCs/>")
+        if (r.underline) append("<w:u w:val=\"single\"/>")
         if (r.color and 0xFFFFFF != 0) append("<w:color w:val=\"${hex(r.color)}\"/>")
         val hp = (r.sizePt * 2f).roundToInt().coerceAtLeast(2)
         append("<w:sz w:val=\"$hp\"/><w:szCs w:val=\"$hp\"/></w:rPr>")
@@ -269,6 +271,19 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
             body.append("</w:tr>")
         }
         body.append("</w:tbl>")
+    }
+
+    /** Immagine nel testo, in un paragrafo alto esattamente quanto lei. */
+    private fun inlinePic(p: DocItem.InlinePic, extra: String) {
+        val ext = if (p.png) "png" else "jpg"
+        images += p.bytes to ext
+        val n = images.size
+        val id = ++anchorId
+        val emu = { pt: Float -> (pt * 12700.0).roundToLong().coerceAtLeast(1L) }
+        body.append("<w:p><w:pPr><w:spacing w:before=\"${tw(p.beforePt)}\" w:after=\"0\" w:line=\"${tw(p.h + 1f)}\" w:lineRule=\"exact\"/>")
+            .append("<w:ind w:left=\"${tw(p.x)}\" w:right=\"0\" w:firstLine=\"0\"/><w:jc w:val=\"left\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr>").append(extra)
+            .append("<w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${emu(p.w)}\" cy=\"${emu(p.h)}\"/>")
+            .append("<wp:docPr id=\"$id\" name=\"Figura $id\"/>").append(graphic(n, ext, emu(p.w), emu(p.h))).append("</wp:inline></w:drawing></w:r></w:p>")
     }
 
     private var anchorId = 1000

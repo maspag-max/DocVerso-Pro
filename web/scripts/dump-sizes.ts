@@ -1,0 +1,11 @@
+import { readFileSync } from 'fs';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { extractPage } from '../src/pdf/extract';
+import { nodePlatform } from './node-platform';
+const root = '/home/claude/docverso/web/node_modules/pdfjs-dist/';
+const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(process.argv[2])), fontExtraProperties: true, standardFontDataUrl: root + 'standard_fonts/' }).promise;
+const ex = await extractPage(await pdf.getPage(+(process.argv[3] ?? 1)), pdfjs.OPS as any, { encodeImage: nodePlatform.encodeImage });
+const r = (v: number) => Math.round(v * 10) / 10;
+const sizes: Record<string, number> = {}; for (const g of ex.page.glyphs) sizes[g.size.toFixed(2)] = (sizes[g.size.toFixed(2)] ?? 0) + 1; console.log('corpi', sizes);
+console.log('glyphs', ex.page.glyphs.slice(0, 6).map(g => [g.ch, r(g.x), r(g.base), r(g.w), r(g.size)]));
+console.log('missing', ex.missing, 'pics', ex.page.pics.length);

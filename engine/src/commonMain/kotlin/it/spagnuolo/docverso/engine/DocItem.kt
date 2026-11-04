@@ -47,6 +47,7 @@ sealed interface DocItem {
     data class Run(
         val text: String, val font: String?, val sizePt: Float,
         val bold: Boolean = false, val italic: Boolean = false, val color: Int = 0,
+        val underline: Boolean = false,
     )
 
     /** Allineamento di un pezzo di riga: a sinistra, centrato o a destra della posizione [Piece.x]. */
@@ -73,6 +74,12 @@ sealed interface DocItem {
         /** Rientro della prima riga rispetto alle altre (positivo = più a destra). */
         val firstLinePt: Float = 0f,
     ) : Block
+
+    /**
+     * Immagine nel testo (foto, figura) al suo posto nella colonna: segue il testo se questo si allunga
+     * (traduzione) invece di restare ferma sulla pagina e finirci sopra. [x] = rientro dal bordo della colonna.
+     */
+    class InlinePic(val bytes: ByteArray, val png: Boolean, val x: Float, val w: Float, val h: Float, val beforePt: Float) : Block
 
     /** Fine della colonna sinistra: il testo seguente va nella colonna destra. */
     data object ColumnBreak : Block
