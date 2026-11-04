@@ -26,7 +26,7 @@ external interface JsPage {
 }
 
 /** Parola riconosciuta dall'OCR (pixel dell'immagine) con il numero della sua riga. */
-external interface JsWord { val text: String; val l: Double; val t: Double; val r: Double; val b: Double; val line: Int }
+external interface JsWord { val text: String; val l: Double; val t: Double; val r: Double; val b: Double; val line: Int; val base: Double?; val confidence: Double? }
 
 /** File dentro il pacchetto Word. */
 @JsExport
@@ -91,6 +91,18 @@ class WordBuilder(private val pageWidthMm: Double = 210.0, private val pageHeigh
             items += r.t.toFloat() to DocItem.Image(jpeg, r.w, r.h, r.w / width.toFloat())
         }
         pages += items.sortedBy { it.first }.map { it.second }
+    }
+
+    /**
+     * Pagina scansionata ricostruita esatta (tabelle dalle linee, testo in posizione), già raddrizzata.
+     * [pixels] 0xRRGGBB riga per riga; [words] in pixel; [crop] ritaglia una zona (pixel) in JPEG.
+     */
+    fun addScanExactPage(
+        words: Array<JsWord>, width: Int, height: Int, pixels: IntArray,
+        crop: (l: Int, t: Int, w: Int, h: Int) -> ByteArray?,
+    ) {
+        val ws = words.map { ScanExact.OcrWord(it.text, it.l.toFloat(), it.t.toFloat(), it.r.toFloat(), it.b.toFloat(), it.line, it.base?.toFloat(), it.confidence?.toFloat() ?: 90f) }
+        pages += listOf(ScanExact.build(ScanPage(width, height, pixels), pixels, ws) { r -> crop(r.l, r.t, r.w, r.h) })
     }
 
     /** Pagina con una sola immagine (foto senza testo riconosciuto). */
@@ -158,3 +170,34 @@ class ImagePdfBuilder {
     }
     fun finish(title: String): ByteArray = w.finish(title)
 }
+
+/** Inclinazione stimata di una pagina scansionata, in gradi (0 se è già dritta). */
+@JsExport
+fun skewAngle(width: Int, height: Int, pixels: IntArray): Double = ScanExact.skewAngle(width, height, pixels).toDouble()
+
+/** Pagina ruotata di [degrees] intorno al centro (per raddrizzarla), stessa misura. */
+@JsExport
+fun rotatePixels(width: Int, height: Int, pixels: IntArray, degrees: Double): IntArray = ScanExact.rotate(width, height, pixels, degrees.toFloat())
+
+/** Solo per le prove: tempi dei passaggi dell'analisi delle scansioni. */
+@JsExport
+fun debugScanSteps(width: Int, height: Int, pixels: IntArray): String {
+    val out = StringBuilder()
+    var t = kotlin.js.Date.now()
+    fun lap(name: String, n: Int) { val now = kotlin.js.Date.now(); out.append("$name: $n in ${(now - t).toInt()} ms\n"); t = now }
+    lap("rules", ScanExact.rules(width, height, pixels).size)
+    lap("tints", ScanExact.tints(width, height, pixels).size)
+    lap("checkboxes", ScanExact.checkboxes(width, height, pixels, 8, 40).size)
+    lap("regions", ScanPage(width, height, pixels).imageRegions(emptyList()).size)
+    return out.toString()
+}
+
+/** Solo per le prove: registro dell'analisi delle scansioni. */
+@JsExport
+fun debugScanLog(on: Boolean): String { val t = ScanExact.log.joinToString("\n"); ScanExact.log.clear(); ScanExact.debug = on; return t }
+
+/** Zone di testo saltate dall'OCR, da rileggere: [l, t, w, h] in pixel. */
+@JsExport
+fun missedTextZones(width: Int, height: Int, pixels: IntArray, words: Array<JsWord>): Array<IntArray> =
+    ScanPage(width, height, pixels).missedText(words.map { LayoutAnalyzer.Box(it.l.toFloat(), it.t.toFloat(), it.r.toFloat(), it.b.toFloat()) })
+        .map { intArrayOf(it.l, it.t, it.w, it.h) }.toTypedArray()

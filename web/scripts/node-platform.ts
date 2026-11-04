@@ -31,6 +31,17 @@ function toCanvas(img: Rgba): Canvas {
 export const nodePlatform: Platform = {
   png: img => new Uint8Array(toCanvas(img).toBuffer('image/png')),
   jpeg: (img, q) => new Uint8Array(toCanvas(img).toBuffer('image/jpeg', Math.round(q * 100))),
+  fromPixels(w, h, px) {
+    const c = createCanvas(w, h); const ctx = c.getContext('2d');
+    const d = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < px.length; i++) { d[i * 4] = px[i] >> 16 & 255; d[i * 4 + 1] = px[i] >> 8 & 255; d[i * 4 + 2] = px[i] & 255; d[i * 4 + 3] = 255; }
+    ctx.putImageData(new ImageData(d, w, h), 0, 0);
+    return {
+      width: w, height: h,
+      crop: (x, y, cw, ch) => { const g = ctx.getImageData(x, y, cw, ch); return { data: g.data as any, width: cw, height: ch }; },
+      pixels: () => px, release: () => {},
+    };
+  },
   async encodeImage(img) {
     const c = imageToCanvas(img);
     if (!c) return null;

@@ -8,7 +8,7 @@ export interface JsGlyph { ch: string; x: number; base: number; w: number; size:
 export interface JsBox { l: number; t: number; r: number; b: number; color?: number | null }
 export interface JsPic { jpeg: KBytes; l: number; t: number; r: number; b: number; behind: boolean }
 export interface JsPage { w: number; h: number; fonts: JsFont[]; glyphs: JsGlyph[]; fills: JsBox[]; art: JsBox[]; pics: JsPic[] }
-export interface JsWord { text: string; l: number; t: number; r: number; b: number; line: number }
+export interface JsWord { text: string; l: number; t: number; r: number; b: number; line: number; base?: number | null; confidence?: number }
 
 /** Byte normali → ByteArray di Kotlin (stessa memoria, nessuna copia). */
 export const toK = (u: Uint8Array): KBytes => new Int8Array(u.buffer, u.byteOffset, u.byteLength);

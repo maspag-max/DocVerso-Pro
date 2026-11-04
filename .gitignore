@@ -9,3 +9,4 @@ web/src/engine/
 local.properties
 .DS_Store
 web/public/pdfjs/
+web/public/tesseract/

@@ -107,4 +107,55 @@ class ScanPage(val width: Int, val height: Int, private val px: IntArray) {
             Rect(l, t, w, h)
         }
     }
+
+    /**
+     * Zone con inchiostro "da testo" dove l'OCR non ha trovato parole (Tesseract a volte salta un blocco intero,
+     * per esempio un titolo): da rileggere. Esclude le foto e le linee. Riquadri in pixel.
+     */
+    fun missedText(words: List<LayoutAnalyzer.Box>): List<Rect> {
+        val gw = 160
+        val gh = (gw * height / width.toFloat()).toInt().coerceAtLeast(1)
+        val sx = gw / width.toFloat(); val sy = gh / height.toFloat()
+        val ink = BooleanArray(gw * gh) { i ->
+            val gx = i % gw; val gy = i / gw
+            val x0 = (gx / sx).toInt(); val x1 = ((gx + 1) / sx).toInt().coerceIn(x0 + 1, width)
+            val y0 = (gy / sy).toInt(); val y1 = ((gy + 1) / sy).toInt().coerceIn(y0 + 1, height)
+            var d = 0; var n = 0
+            var y = y0
+            while (y < y1) { var x = x0; while (x < x1) { n++; if (lum(at(x, y)) < 150f) d++; x += 2 }; y += 2 }
+            d >= 2 && d < n * 0.92f
+        }
+        for (r in words) {
+            val l = ((r.l * sx).toInt() - 1).coerceAtLeast(0); val t = ((r.t * sy).toInt() - 1).coerceAtLeast(0)
+            val rr = ((r.r * sx).toInt() + 1).coerceAtMost(gw - 1); val bb = ((r.b * sy).toInt() + 1).coerceAtMost(gh - 1)
+            for (y in t..bb) for (x in l..rr) ink[y * gw + x] = false
+        }
+        val pics = imageRegions(words)
+        val seen = BooleanArray(ink.size)
+        val out = ArrayList<Rect>()
+        val stack = IntArray(ink.size)
+        for (s0 in ink.indices) {
+            if (!ink[s0] || seen[s0]) continue
+            var sp = 0; stack[sp++] = s0; seen[s0] = true
+            var l = gw; var t = gh; var r = -1; var b = -1; var n = 0
+            while (sp > 0) {
+                val i = stack[--sp]; val x = i % gw; val y = i / gw; n++
+                if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y
+                for (dy in -1..1) for (dx in -2..2) {
+                    val nx = x + dx; val ny = y + dy
+                    if (nx !in 0 until gw || ny !in 0 until gh) continue
+                    val j = ny * gw + nx
+                    if (ink[j] && !seen[j]) { seen[j] = true; stack[sp++] = j }
+                }
+            }
+            val bw = r - l + 1; val bh = b - t + 1
+            // Forma da riga di testo: abbastanza larga, non troppo alta, piena quanto basta (le linee sono sottili)
+            if (ScanExact.debug && bw >= 4) ScanExact.log += "componente ${(l / sx).toInt()},${(t / sy).toInt()} ${bw}x${bh} n=$n"
+            if (bw < 4 || bh < 2 || bh > gh * 0.08f || n < bw * bh * 0.3f || bw * bh > gw * gh * 0.1f) continue
+            val rect = Rect((l / sx).toInt(), (t / sy).toInt(), (bw / sx).toInt().coerceAtMost(width - (l / sx).toInt()), (bh / sy).toInt().coerceAtMost(height - (t / sy).toInt()))
+            if (pics.any { p -> rect.l < p.l + p.w && rect.l + rect.w > p.l && rect.t < p.t + p.h && rect.t + rect.h > p.t }) continue
+            out += rect
+        }
+        return out
+    }
 }

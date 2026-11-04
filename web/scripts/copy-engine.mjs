@@ -1,5 +1,5 @@
 // Copia il motore Kotlin/JS compilato dentro src/engine (eseguire prima la build Gradle)
-import { cpSync, existsSync, mkdirSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync } from 'fs';
 const src = new URL('../../engine/build/dist/js/productionLibrary/', import.meta.url);
 const dst = new URL('../src/engine/', import.meta.url);
 if (!existsSync(src)) { console.error('Motore non compilato: ./gradlew :engine:jsBrowserProductionLibraryDistribution'); process.exit(1); }
@@ -14,3 +14,13 @@ const pdfjsDir = new URL('../node_modules/pdfjs-dist/', import.meta.url);
 const pub = new URL('../public/pdfjs/', import.meta.url);
 for (const d of ['standard_fonts', 'cmaps']) cpSync(new URL(d + '/', pdfjsDir), new URL(d + '/', pub), { recursive: true });
 console.log('Risorse di pdf.js copiate in public/pdfjs');
+
+// OCR (Tesseract.js): lavoratore, motore WebAssembly e lingue serviti dall'app (nessun CDN)
+const nm = new URL('../node_modules/', import.meta.url);
+const tess = new URL('../public/tesseract/', import.meta.url);
+mkdirSync(new URL('lang/', tess), { recursive: true });
+cpSync(new URL('tesseract.js/dist/worker.min.js', nm), new URL('worker.min.js', tess));
+for (const f of readdirSync(new URL('tesseract.js-core/', nm))) if (f.includes('lstm')) cpSync(new URL('tesseract.js-core/' + f, nm), new URL(f, tess));
+for (const l of ['ita', 'eng', 'fra', 'deu', 'spa', 'por'])
+  cpSync(new URL(`@tesseract.js-data/${l}/4.0.0_best_int/${l}.traineddata.gz`, nm), new URL(`lang/${l}.traineddata.gz`, tess));
+console.log('OCR copiato in public/tesseract');

@@ -7,6 +7,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { zipSync } from 'fflate';
 import { extractPage, type PdfImage } from './extract';
 import { fromK, toK, type JsWord } from '../engine-types';
+import { padWords } from '../ocr-words';
 import * as engine from '../engine/docverso-engine.mjs';
 
 /** Pixel RGBA (come ImageData). */
@@ -28,6 +29,8 @@ export interface Platform {
   render(page: PDFPageProxy, scale: number): Promise<Raster>;
   png(img: Rgba): Uint8Array;
   jpeg(img: Rgba, quality: number): Uint8Array;
+  /** Raster da pixel 0xRRGGBB (pagina raddrizzata). */
+  fromPixels(width: number, height: number, px: Int32Array): Raster;
 }
 
 /**
@@ -122,14 +125,28 @@ export async function pdfToWord(pdf: PDFDocumentProxy, opt: PdfToWordOptions): P
   return zipParts(builder.build(opt.title ?? 'Documento'));
 }
 
-/** Pagina da immagine: OCR e impaginazione, oppure (senza OCR o senza testo) la pagina come immagine. */
-export async function addScanPage(builder: engine.WordBuilder, raster: Raster, platform: Platform, ocr?: Ocr) {
-  const words = ocr ? await ocr(raster) : null;
-  if (words && words.length > 0) {
-    builder.addOcrPage(words as any, raster.width, raster.height, raster.pixels(), (l, t, w, h) => toK(platform.jpeg(raster.crop(l, t, w, h), 0.88)));
-  } else {
-    builder.addImagePage(toK(platform.jpeg(raster.crop(0, 0, raster.width, raster.height), 0.85)), raster.width, raster.height, 1);
+/**
+ * Pagina da immagine (scansione o foto). Raddrizzata, poi riconoscimento del testo e ricostruzione:
+ * "exact" = come un PDF digitale (tabelle dalle linee, testo in posizione); "flow" = impaginazione a flusso
+ * di TradScan (più adatta alle foto storte o curve). Senza OCR o senza testo: la pagina come immagine.
+ */
+export async function addScanPage(builder: engine.WordBuilder, raster: Raster, platform: Platform, ocr?: Ocr, mode: 'exact' | 'flow' = 'exact') {
+  let r = raster;
+  let px = raster.pixels();
+  if (ocr && mode === 'exact') {
+    const angle = engine.skewAngle(r.width, r.height, px);
+    // Ruotando dell’angolo opposto la pagina si raddrizza
+    if (angle !== 0) { px = engine.rotatePixels(r.width, r.height, px, -angle); r = platform.fromPixels(r.width, r.height, px); }
   }
+  const words = ocr ? await ocr(r) : null;
+  if (words && words.length > 0) {
+    const crop = (l: number, t: number, w: number, h: number) => toK(platform.jpeg(r.crop(l, t, w, h), 0.88));
+    if (mode === 'exact') builder.addScanExactPage(words as any, r.width, r.height, px, crop);
+    else builder.addOcrPage(padWords(words) as any, r.width, r.height, px, crop);
+  } else {
+    builder.addImagePage(toK(platform.jpeg(r.crop(0, 0, r.width, r.height), 0.85)), r.width, r.height, 1);
+  }
+  if (r !== raster) r.release();
 }
 
 export async function translateBuilder(builder: engine.WordBuilder, translate: TranslateBatch, progress?: (done: number, total: number) => void) {

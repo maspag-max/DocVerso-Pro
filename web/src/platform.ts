@@ -52,6 +52,14 @@ function imageCanvas(img: PdfImage): HTMLCanvasElement | null {
 export const browserPlatform: Platform = {
   png: img => dataUrlBytes(fromRgba(img).toDataURL('image/png')),
   jpeg: (img, q) => dataUrlBytes(fromRgba(img).toDataURL('image/jpeg', q)),
+  fromPixels(w, h, px) {
+    const c = canvas(w, h);
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    const d = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < px.length; i++) { d[i * 4] = px[i] >> 16 & 255; d[i * 4 + 1] = px[i] >> 8 & 255; d[i * 4 + 2] = px[i] & 255; d[i * 4 + 3] = 255; }
+    ctx.putImageData(new ImageData(d, w, h), 0, 0);
+    return rasterOf(c, ctx);
+  },
   async encodeImage(img) {
     const c = imageCanvas(img);
     if (!c) return null;
