@@ -131,6 +131,13 @@ object ExactLayout {
                     val colL = mL
                     val colLR = ((leftLines.map { it.r } + lGrids.map { it.xs.last() }).maxOrNull() ?: split.gx - 6f)
                     val colRL = ((rightLines.map { it.l } + rGrids.map { it.xs.first() }).minOrNull() ?: split.gx + 6f)
+                    // Lo spazio vuoto prima delle colonne va nella fascia precedente: così entrambe le colonne
+                    // cominciano in cima alla loro sezione (Word e LibreOffice trattano diversamente lo spazio
+                    // prima del primo paragrafo di una colonna)
+                    val firstTop = (leftLines.map { it.top } + rightLines.map { it.top } + z.grids.map { it.ys.first() }).minOrNull() ?: cursor
+                    val gap = (firstTop - cursor - 3f).coerceAtLeast(0f)
+                    val markAt = blocks.indexOfLast { it is DocItem.SectionMark }
+                    if (gap > 0.5f && markAt >= 0) { blocks.add(markAt, DocItem.Para(emptyList(), 0f, gap)); cursor += gap }
                     val (lb, le) = flow(itemsOf(leftLines, lGrids), colL, colLR, cursor, (colL + colLR) / 2f, text, page.fonts, inGrid)
                     val (rb, re) = flow(itemsOf(rightLines, rGrids), colRL, textR, cursor, (colRL + textR) / 2f, text, page.fonts, inGrid)
                     blocks += lb
