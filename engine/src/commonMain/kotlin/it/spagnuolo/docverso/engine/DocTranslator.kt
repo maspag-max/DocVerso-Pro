@@ -68,16 +68,55 @@ class DocTranslator(private val raw: (String) -> String) {
      * dell'originale (sono misurate dall'alto), ma se il testo tradotto prende una riga in più la pagina
      * ha spazio di riserva e la riga a piè di pagina non scivola sulla pagina dopo.
      */
-    private fun exact(p: DocItem.ExactPage) = DocItem.ExactPage(
-        p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, min(p.marginB, 2f),
-        p.blocks.map { b ->
-            when (b) {
-                is DocItem.Para -> (p.widthPt - p.marginL - p.marginR).let { u -> wrapFit(fit(para(b), b, u), b, u) }
-                is DocItem.Grid -> grid(b)
+    private fun exact(p: DocItem.ExactPage): DocItem.ExactPage {
+        // Larghezza utile di ogni blocco: la colonna in cui sta (le fasce finiscono con SectionMark)
+        val full = p.widthPt - p.marginL - p.marginR
+        val widths = FloatArray(p.blocks.size) { full }
+        var start = 0
+        p.blocks.forEachIndexed { i, b ->
+            if (b is DocItem.SectionMark) {
+                var col = 0
+                for (k in start until i) {
+                    if (p.blocks[k] is DocItem.ColumnBreak) col++
+                    widths[k] = b.cols.getOrNull(col) ?: full
+                }
+                start = i + 1
             }
-        },
-        p.anchors,
-    )
+        }
+        // Testo che scorre (paragrafi di più righe): niente riduzione paragrafo per paragrafo, ma un'unica
+        // riduzione per colonna (carattere e interlinea), così il testo tradotto occupa lo stesso spazio
+        val out = p.blocks.mapIndexed { i, b ->
+            when (b) {
+                is DocItem.Para -> if (flowing(b, widths[i])) para(b) else wrapFit(fit(para(b), b, widths[i]), b, widths[i])
+                is DocItem.Grid -> grid(b)
+                else -> b
+            }
+        }.toMutableList()
+        var from = 0
+        for (i in 0..out.size) {
+            val end = i == out.size || out[i] is DocItem.ColumnBreak || out[i] is DocItem.SectionMark
+            if (!end) continue
+            val idx = (from until i).filter { k -> (p.blocks[k] as? DocItem.Para)?.let { flowing(it, widths[k]) } == true }
+            val grown = idx.sumOf { width((out[it] as DocItem.Para).pieces[0].runs).toDouble() }
+            val orig = idx.sumOf { width((p.blocks[it] as DocItem.Para).pieces[0].runs).toDouble() }
+            if (orig > 0 && grown > orig) {
+                val f = (1.0 / kotlin.math.sqrt(grown / orig)).toFloat().coerceIn(0.85f, 1f)
+                for (k in idx) {
+                    val q = out[k] as DocItem.Para
+                    out[k] = q.copy(
+                        linePt = q.linePt * f, beforePt = q.beforePt,
+                        pieces = q.pieces.map { pc -> pc.copy(runs = pc.runs.map { r -> r.copy(sizePt = ((r.sizePt * f * 2f).roundToInt() / 2f).coerceAtLeast(4f)) }) },
+                    )
+                }
+            }
+            from = i + 1
+        }
+        return DocItem.ExactPage(p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, min(p.marginB, 2f), out, p.anchors)
+    }
+
+    /** Paragrafo di testo che va a capo (più righe nell'originale), non un'etichetta o un pezzo di riga. */
+    private fun flowing(b: DocItem.Para, usable: Float): Boolean =
+        b.pieces.size == 1 && b.frame == null && b.align == DocItem.Align.LEFT && width(b.pieces[0].runs) > (usable - b.pieces[0].x - b.rightPt) * 1.15f
 
     private fun para(p: DocItem.Para): DocItem.Para =
         // Il testo tradotto può essere più lungo: le righe in posizione fissa diventano libere di andare a capo

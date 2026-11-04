@@ -70,7 +70,18 @@ sealed interface DocItem {
         val align: Align = Align.LEFT,
         val justify: Boolean = false,
         val frame: FloatArray? = null,
+        /** Rientro della prima riga rispetto alle altre (positivo = più a destra). */
+        val firstLinePt: Float = 0f,
     ) : Block
+
+    /** Fine della colonna sinistra: il testo seguente va nella colonna destra. */
+    data object ColumnBreak : Block
+
+    /**
+     * Fine di una fascia della pagina. [cols] = larghezze delle colonne della fascia appena finita
+     * (vuota = una sola colonna, larga quanto il testo), [gaps] = spazi fra le colonne.
+     */
+    data class SectionMark(val cols: List<Float>, val gaps: List<Float>) : Block
 
     /** Tabella dalle linee disegnate: colonne e righe con le misure dell'originale. */
     data class Grid(

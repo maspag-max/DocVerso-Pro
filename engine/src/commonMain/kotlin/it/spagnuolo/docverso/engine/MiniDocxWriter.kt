@@ -19,10 +19,21 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
     private val pageH = (pageHeightMm / 25.4f * 1440f).toInt()
 
     /** Formato e margini di una pagina (twip). Ogni pagina è una sezione: le pagine esatte hanno i loro. */
-    private data class Sect(val w: Int, val h: Int, val top: Int, val right: Int, val bottom: Int, val left: Int) {
+    private data class Sect(
+        val w: Int, val h: Int, val top: Int, val right: Int, val bottom: Int, val left: Int,
+        /** Inizio della sezione: "nextPage" (pagina nuova) o "continuous" (fascia sulla stessa pagina). */
+        val type: String = "nextPage",
+        /** Colonne (larghezze e spazi in twip); vuota = una colonna. */
+        val cols: List<Int> = emptyList(), val gaps: List<Int> = emptyList(),
+    ) {
         fun xml(): String {
             val orient = if (w > h) " w:orient=\"landscape\"" else ""
-            return "<w:sectPr><w:type w:val=\"nextPage\"/><w:pgSz w:w=\"$w\" w:h=\"$h\"$orient/><w:pgMar w:top=\"$top\" w:right=\"$right\" w:bottom=\"$bottom\" w:left=\"$left\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>"
+            val c = if (cols.size < 2) "" else buildString {
+                append("<w:cols w:num=\"${cols.size}\" w:space=\"${gaps.firstOrNull() ?: 0}\" w:equalWidth=\"0\">")
+                cols.forEachIndexed { i, cw -> append("<w:col w:w=\"$cw\"").append(if (i < cols.size - 1) " w:space=\"${gaps.getOrElse(i) { 0 }}\"" else "").append("/>") }
+                append("</w:cols>")
+            }
+            return "<w:sectPr><w:type w:val=\"$type\"/><w:pgSz w:w=\"$w\" w:h=\"$h\"$orient/><w:pgMar w:top=\"$top\" w:right=\"$right\" w:bottom=\"$bottom\" w:left=\"$left\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/>$c</w:sectPr>"
         }
     }
     private val defaultSect get() = Sect(pageW, pageH, margin, margin, margin, margin)
@@ -157,10 +168,23 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         sect = s
         val anchors = StringBuilder()
         for (a in p.anchors) anchors.append(anchor(a))
+        // Fasce della pagina (una o due colonne): ogni fascia è una sezione; la prima comincia la pagina,
+        // le altre continuano sulla stessa pagina
+        var first = true
+        val lastMark = p.blocks.indexOfLast { it is DocItem.SectionMark }
         p.blocks.forEachIndexed { i, b ->
             when (b) {
                 is DocItem.Para -> exactPara(b, if (i == 0) anchors.toString() else "")
                 is DocItem.Grid -> grid(b)
+                is DocItem.ColumnBreak -> body.append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr><w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:br w:type=\"column\"/></w:r></w:p>")
+                is DocItem.SectionMark -> {
+                    // La sezione si descrive alla sua fine: colonne della fascia appena finita
+                    val z = s.copy(type = if (first) "nextPage" else "continuous", cols = b.cols.map { tw(it) }, gaps = b.gaps.map { tw(it) })
+                    first = false
+                    // L'ultima fascia si chiude con la pagina (la sua sezione la scrive la pagina successiva o la fine)
+                    if (i == lastMark) sect = z
+                    else body.append("<w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/>").append(z.xml()).append("<w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr></w:p>")
+                }
             }
         }
     }
@@ -192,7 +216,9 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         }
         pPr.append("<w:spacing w:before=\"${tw(p.beforePt)}\" w:after=\"0\" w:line=\"${tw(p.linePt).coerceAtLeast(12)}\" w:lineRule=\"exact\"/>")
         val left = if (first != null && p.align == DocItem.Align.LEFT && p.frame == null) tw(first.x) else 0
-        pPr.append("<w:ind w:left=\"$left\" w:right=\"${tw(p.rightPt)}\" w:firstLine=\"0\"/>")
+        val fl = tw(p.firstLinePt)
+        val firstAttr = if (fl >= 0) "w:firstLine=\"$fl\"" else "w:hanging=\"${-fl}\""
+        pPr.append("<w:ind w:left=\"$left\" w:right=\"${tw(p.rightPt)}\" $firstAttr/>")
         when {
             p.justify -> pPr.append("<w:jc w:val=\"both\"/>")
             p.align == DocItem.Align.CENTER -> pPr.append("<w:jc w:val=\"center\"/>")

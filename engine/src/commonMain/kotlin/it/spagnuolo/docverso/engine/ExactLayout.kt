@@ -106,11 +106,59 @@ object ExactLayout {
         val mB = (page.h - (yb.maxOrNull() ?: (page.h - 56f)) - 4f).coerceIn(0f, 56f)
         val textR = page.w - mR
 
-        // --- Blocchi nell'ordine verticale
-        class Item(val top: Float, val line: TLine? = null, val grid: GridShape? = null)
-        val items = (lines.map { Item(it.top, line = it) } + grids.map { Item(it.ys.first(), grid = it) }).sortedBy { it.top }
+        // --- Colonne: pagine a due colonne (articoli, riviste) → vere colonne Word, una zona per volta
+        val split = columnSplit(free, grids, page.w)
         val blocks = ArrayList<DocItem.Block>()
-        var cursor = mT
+        if (split == null) {
+            blocks += flow(itemsOf(lines, grids), mL, textR, mT, page.w / 2f, text, page.fonts, inGrid).first
+            if (blocks.isEmpty() || blocks.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
+        } else {
+            var cursor = mT
+            for (z in zonesOf(split, free, grids)) {
+                if (z.right == null) {
+                    // Zona a una colonna (titolo, tabella o figura larga)
+                    val (bs, end) = flow(itemsOf(lines(z.left), z.grids), mL, textR, cursor, page.w / 2f, text, page.fonts, inGrid)
+                    blocks += bs
+                    if (bs.isEmpty() || bs.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
+                    blocks += DocItem.SectionMark(emptyList(), emptyList())
+                    cursor = end
+                } else {
+                    val lGrids = z.grids.filter { it.xs.last() <= split.gx }
+                    val rGrids = z.grids.filter { it.xs.first() >= split.gx }
+                    val leftLines = lines(z.left); val rightLines = lines(z.right)
+                    val colL = mL
+                    val colLR = ((leftLines.map { it.r } + lGrids.map { it.xs.last() }).maxOrNull() ?: split.gx - 6f)
+                    val colRL = ((rightLines.map { it.l } + rGrids.map { it.xs.first() }).minOrNull() ?: split.gx + 6f)
+                    val (lb, le) = flow(itemsOf(leftLines, lGrids), colL, colLR, cursor, (colL + colLR) / 2f, text, page.fonts, inGrid)
+                    val (rb, re) = flow(itemsOf(rightLines, rGrids), colRL, textR, cursor, (colRL + textR) / 2f, text, page.fonts, inGrid)
+                    blocks += lb
+                    if (lb.isEmpty() || lb.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
+                    blocks += DocItem.ColumnBreak
+                    blocks += rb
+                    if (rb.isEmpty() || rb.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
+                    blocks += DocItem.SectionMark(listOf(colLR - colL, textR - colRL), listOf(max(colRL - colLR, 4f)))
+                    cursor = max(le, re)
+                }
+            }
+        }
+        return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors)
+    }
+
+    private class Item(val top: Float, val line: TLine? = null, val grid: GridShape? = null)
+
+    private fun itemsOf(lines: List<TLine>, grids: List<GridShape>) =
+        (lines.map { Item(it.top, line = it) } + grids.map { Item(it.ys.first(), grid = it) }).sortedBy { it.top }
+
+    /**
+     * Testo e tabelle di una colonna (o della pagina) nell'ordine verticale, fra [colL] e [colR], dal punto
+     * [start]. Restituisce i blocchi e il punto in cui finiscono.
+     */
+    private fun flow(
+        items: List<Item>, colL: Float, colR: Float, start: Float, centerX: Float,
+        text: List<Word>, fonts: List<Font>, inGrid: List<Box>,
+    ): Pair<List<DocItem.Block>, Float> {
+        val blocks = ArrayList<DocItem.Block>()
+        var cursor = start
         var i = 0
         var lastWasGrid = false
         while (i < items.size) {
@@ -124,7 +172,7 @@ object ExactLayout {
                     blocks += DocItem.Para(emptyList(), 0f, h)
                     cursor += h
                 }
-                blocks += gridBlock(g, text, mL, page.fonts, inGrid)
+                blocks += gridBlock(g, text, colL, fonts, inGrid)
                 cursor = max(cursor, g.ys.last())
                 lastWasGrid = true
                 i++
@@ -133,20 +181,23 @@ object ExactLayout {
             val line = it.line!!
             // Riga accanto a qualcosa di già messo (sovrapposta): in posizione assoluta
             if (line.top < cursor - 1.5f) {
-                blocks += framed(line, page.fonts)
+                blocks += framed(line, fonts)
                 i++
                 continue
             }
-            // Righe di un paragrafo che va a capo: un solo paragrafo, Word le rimanda a capo uguale
+            // Righe di un paragrafo che va a capo: un solo paragrafo, Word le rimanda a capo uguale.
+            // La prima riga può essere rientrata (rientro della prima riga), le altre allineate fra loro.
             val group = arrayListOf(line)
+            val reach = { ln: TLine -> ln.r > colR - max(4f * ln.size, (colR - colL) * 0.12f) }
             while (i + group.size < items.size) {
                 val nx = items[i + group.size].line ?: break
                 val pv = group.last()
                 val step = nx.base - pv.base
                 val sameStep = group.size < 2 || abs(step - (group[1].base - group[0].base)) < 0.6f
-                val ok = pv.segs.size == 1 && nx.segs.size == 1 && abs(nx.l - line.l) < 2f &&
-                    abs(nx.size - pv.size) < 0.6f && step > 0f && step < pv.size * 1.8f && sameStep &&
-                    pv.r > textR - max(4f * pv.size, (textR - line.l) * 0.12f)
+                val bodyL = if (group.size >= 2) group[1].l else nx.l
+                val aligned = abs(nx.l - bodyL) < 2f && (group.size >= 2 || abs(nx.l - line.l) < 2f || (line.l - nx.l in 2f..(6f * line.size)))
+                val ok = pv.segs.size == 1 && nx.segs.size == 1 && aligned &&
+                    abs(nx.size - pv.size) < 0.6f && step > 0f && step < pv.size * 1.8f && sameStep && reach(pv)
                 if (!ok) break
                 group += nx
             }
@@ -158,7 +209,7 @@ object ExactLayout {
             if (group.size > 1) {
                 val runs = ArrayList<DocItem.Run>()
                 group.forEachIndexed { k, ln ->
-                    val rs = ln.segs[0].runs(page.fonts, single = true)
+                    val rs = ln.segs[0].runs(fonts, single = true)
                     if (k > 0 && runs.isNotEmpty()) {
                         val last = runs.removeAt(runs.size - 1)
                         // A capo dopo un trattino d'unione: la parola si ricompone
@@ -166,21 +217,119 @@ object ExactLayout {
                     }
                     runs += rs
                 }
-                val colR = group.maxOf { it.r }
-                val justify = group.dropLast(1).all { abs(it.r - colR) < 1.5f } && group.size > 2
+                val bodyL = group[1].l
+                val colRight = group.dropLast(1).maxOf { it.r }
+                val justify = group.size > 2 && group.dropLast(1).all { abs(it.r - colRight) < 1.5f }
                 blocks += DocItem.Para(
-                    listOf(DocItem.Piece(line.l - mL, mergeRuns(runs))), before, lineH,
-                    rightPt = (textR - colR).coerceAtLeast(0f), justify = justify,
+                    listOf(DocItem.Piece(bodyL - colL, mergeRuns(runs))), before, lineH,
+                    rightPt = (colR - colRight).coerceAtLeast(0f), justify = justify, firstLinePt = line.l - bodyL,
                 )
             } else {
-                blocks += lineBlock(line, before, lineH, mL, textR, page)
+                blocks += lineBlock(line, before, lineH, colL, colR, centerX, fonts)
             }
-            cursor = lineTop(line.base, size, lineH) .coerceAtLeast(cursor) + lineH * group.size
+            cursor = lineTop(line.base, size, lineH).coerceAtLeast(cursor) + lineH * group.size
             lastWasGrid = false
             i += group.size
         }
-        if (blocks.isEmpty() || lastWasGrid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
-        return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors)
+        return blocks to cursor
+    }
+
+    // ---------------------------------------------------------------- colonne
+
+    /** Confine fra le colonne: [gx] = metà dello spazio vuoto fra colonna sinistra e destra. */
+    private class Split(val gx: Float)
+
+    /**
+     * Pagina a due colonne? Si cerca una linea verticale (al centro della pagina) che quasi nessuna riga
+     * attraversa con testo continuo, con molte righe a sinistra e a destra.
+     */
+    private fun columnSplit(words: List<Word>, grids: List<GridShape>, pageW: Float): Split? {
+        if (words.size < 40) return null
+        val rows = lines(words)
+        fun crosses(ln: TLine, x: Float): Boolean {
+            val ws = ln.segs.flatMap { it.words }.sortedBy { it.l }
+            if (ws.any { it.l < x && it.r > x }) return true
+            val before = ws.lastOrNull { it.r <= x } ?: return false
+            val after = ws.firstOrNull { it.l >= x } ?: return false
+            return after.l - before.r < 1.5f * ln.size
+        }
+        val minL = words.minOf { it.l }; val maxR = words.maxOf { it.r }
+        fun median(v: List<Float>) = if (v.isEmpty()) 0f else v.sorted()[v.size / 2]
+        var best: Split? = null; var bestScore = 0f
+        var x = pageW * 0.3f
+        while (x <= pageW * 0.7f) {
+            var cross = 0
+            val lw = ArrayList<Float>(); val rw = ArrayList<Float>()
+            for (ln in rows) {
+                if (crosses(ln, x)) { cross++; continue }
+                val ws = ln.segs.flatMap { it.words }
+                val l = ws.filter { it.r <= x }; val r = ws.filter { it.l >= x }
+                if (l.isNotEmpty()) lw += l.maxOf { it.r } - l.minOf { it.l }
+                if (r.isNotEmpty()) rw += r.maxOf { it.r } - r.minOf { it.l }
+            }
+            cross += grids.count { it.xs.first() < x - 2f && it.xs.last() > x + 2f }
+            // Vere colonne di testo: righe che riempiono buona parte della colonna da entrambe le parti
+            // (non un indice con i numeri di pagina a destra, né etichette e valori di un modulo)
+            val full = median(lw) >= (x - minL) * 0.55f && median(rw) >= (maxR - x) * 0.55f
+            val score = min(lw.size, rw.size) - 2f * cross
+            if (full && min(lw.size, rw.size) >= 8 && cross <= rows.size * 0.25f && score > bestScore) { bestScore = score; best = Split(x) }
+            x += 2f
+        }
+        // Al centro dello spazio vuoto, non sul suo bordo
+        return best?.let { b ->
+            val gapL = words.filter { it.r <= b.gx + 0.01f }.maxOfOrNull { w -> if (w.r > b.gx - pageW * 0.2f) w.r else 0f } ?: b.gx
+            val gapR = words.filter { it.l >= b.gx }.minOfOrNull { w -> if (w.l < b.gx + pageW * 0.2f) w.l else pageW } ?: b.gx
+            Split((gapL + gapR) / 2f)
+        }
+    }
+
+    /** Fascia verticale della pagina: a una colonna ([right] = null) o a due. */
+    private class Zone(val left: List<Word>, val right: List<Word>?, val grids: List<GridShape>)
+
+    /**
+     * Divide la pagina in fasce dall'alto: le righe che attraversano il confine (titoli, tabelle larghe)
+     * formano fasce a una colonna, il resto fasce a due colonne.
+     */
+    private fun zonesOf(split: Split, words: List<Word>, grids: List<GridShape>): List<Zone> {
+        val gx = split.gx
+        class Band(val top: Float, val bottom: Float, val wide: Boolean, val words: List<Word>, val grid: GridShape?)
+        val bands = ArrayList<Band>()
+        for (ln in lines(words)) {
+            val ws = ln.segs.flatMap { it.words }.sortedBy { it.l }
+            val before = ws.lastOrNull { it.r <= gx }; val after = ws.firstOrNull { it.l >= gx }
+            val wide = ws.any { it.l < gx && it.r > gx } || (before != null && after != null && after.l - before.r < 1.5f * ln.size)
+            bands += Band(ln.top, ln.bottom, wide, ws, null)
+        }
+        for (g in grids) bands += Band(g.ys.first(), g.ys.last(), g.xs.first() < gx - 2f && g.xs.last() > gx + 2f, emptyList(), g)
+        bands.sortBy { it.top }
+        // Righe corte da una parte sola (ultima riga di un titolo o di un paragrafo largo, titolo di sezione):
+        // seguono la fascia più vicina, sopra o sotto, fra quelle certe (larghe o con testo da entrambe le parti)
+        val sure = bands.map { b -> b.wide || b.grid != null || (b.words.any { it.cx < gx } && b.words.any { it.cx >= gx }) }
+        val wideOf = BooleanArray(bands.size) { bands[it].wide }
+        for (k in bands.indices) {
+            if (sure[k]) continue
+            val p = (k - 1 downTo 0).firstOrNull { sure[it] }
+            val n = (k + 1 until bands.size).firstOrNull { sure[it] }
+            val gp = p?.let { bands[k].top - bands[it].bottom } ?: Float.MAX_VALUE
+            val gn = n?.let { bands[it].top - bands[k].bottom } ?: Float.MAX_VALUE
+            val from = if (gp <= gn) p else n
+            wideOf[k] = from != null && bands[from].wide
+        }
+        // Una riga larga in mezzo alle colonne (es. un titolo di sezione centrato su due colonne) chiude la fascia
+        val zones = ArrayList<Zone>()
+        var cur = ArrayList<Band>(); var curWide: Boolean? = null
+        fun close() {
+            if (cur.isEmpty()) return
+            val ws = cur.flatMap { it.words }; val gs = cur.mapNotNull { it.grid }
+            zones += if (curWide == true) Zone(ws, null, gs) else Zone(ws.filter { it.cx < gx }, ws.filter { it.cx >= gx }, gs)
+            cur = ArrayList()
+        }
+        bands.forEachIndexed { k, b ->
+            if (curWide != null && wideOf[k] != curWide) close()
+            curWide = wideOf[k]; cur += b
+        }
+        close()
+        return zones
     }
 
     /** Con interlinea esatta il testo poggia su una linea di base a circa l'80% dell'altezza della riga. */
@@ -333,18 +482,18 @@ object ExactLayout {
         }
     }
 
-    private fun lineBlock(line: TLine, before: Float, lineH: Float, mL: Float, textR: Float, page: Page): DocItem.Para {
+    private fun lineBlock(line: TLine, before: Float, lineH: Float, colL: Float, colR: Float, centerX: Float, fonts: List<Font>): DocItem.Para {
         val pieces = line.segs.mapIndexed { k, s ->
-            val runs = s.runs(page.fonts)
+            val runs = s.runs(fonts)
             val last = k == line.segs.lastIndex
             when {
                 // Ultimo pezzo che finisce sul bordo destro: tabulazione a destra
-                last && line.segs.size > 1 && abs(s.r - textR) < 6f -> DocItem.Piece(s.r - mL, runs, DocItem.Align.RIGHT)
-                else -> DocItem.Piece(s.l - mL, runs)
+                last && line.segs.size > 1 && abs(s.r - colR) < 6f -> DocItem.Piece(s.r - colL, runs, DocItem.Align.RIGHT)
+                else -> DocItem.Piece(s.l - colL, runs)
             }
         }
-        // Riga sola centrata nella pagina
-        val center = line.segs.size == 1 && abs((line.l + line.r) / 2f - page.w / 2f) < 3f && line.l - mL > 20f
+        // Riga sola centrata (nella pagina o nella colonna)
+        val center = line.segs.size == 1 && abs((line.l + line.r) / 2f - centerX) < 3f && line.l - colL > 20f
         return if (center) DocItem.Para(listOf(DocItem.Piece(0f, pieces[0].runs)), before, lineH, align = DocItem.Align.CENTER)
         else DocItem.Para(pieces, before, lineH)
     }
