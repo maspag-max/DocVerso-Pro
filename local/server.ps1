@@ -1,5 +1,7 @@
 ﻿# DocVerso in locale: piccolo server web che serve la cartella "app" solo a questo computer
 # (indirizzo localhost, non raggiungibile da altri PC). Non servono diritti di amministratore.
+# Ogni richiesta è servita in parallelo (una richiesta lenta non blocca le altre); i file grandi
+# (modelli di traduzione) sono inviati a pezzi, senza caricarli tutti in memoria.
 # Si chiude chiudendo la sua finestra.
 
 $ErrorActionPreference = 'Stop'
@@ -11,15 +13,21 @@ if (-not (Test-Path (Join-Path $root 'index.html'))) {
 }
 $rootFull = [System.IO.Path]::GetFullPath($root)
 
-$types = @{
-    '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'
-    '.css' = 'text/css; charset=utf-8'; '.json' = 'application/json'; '.wasm' = 'application/wasm'
-    '.svg' = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.ico' = 'image/x-icon'
-    '.woff2' = 'font/woff2'; '.woff' = 'font/woff'; '.ttf' = 'font/ttf'; '.pfb' = 'application/octet-stream'
-    '.bcmap' = 'application/octet-stream'; '.gz' = 'application/gzip'; '.map' = 'application/json'; '.txt' = 'text/plain; charset=utf-8'
-}
+# Un clic dentro questa finestra non deve mettere in pausa il server ("Modifica rapida" di Windows)
+try {
+    Add-Type -Namespace DocVerso -Name Console -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int h);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, uint m);
+'@
+    $h = [DocVerso.Console]::GetStdHandle(-10)
+    $mode = 0
+    if ([DocVerso.Console]::GetConsoleMode($h, [ref]$mode)) {
+        [void][DocVerso.Console]::SetConsoleMode($h, ($mode -band (-bnot 0x0040)) -bor 0x0080)
+    }
+} catch { }
 
-# Porta fissa (così la cache dei modelli di traduzione resta valida fra un avvio e l'altro); se è occupata, la successiva
+# Porta fissa (così la cache del browser resta valida fra un avvio e l'altro); se è occupata, la successiva
 $listener = $null
 foreach ($port in 8765..8775) {
     try {
@@ -37,6 +45,49 @@ if (-not $listener) {
 }
 $url = $listener.Prefixes | Select-Object -First 1
 
+# Risposta a una richiesta: eseguita in un "runspace" separato, più richieste insieme
+$serve = {
+    param($ctx, $rootFull)
+    $types = @{
+        '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'
+        '.css' = 'text/css; charset=utf-8'; '.json' = 'application/json'; '.wasm' = 'application/wasm'
+        '.svg' = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.ico' = 'image/x-icon'
+        '.woff2' = 'font/woff2'; '.woff' = 'font/woff'; '.ttf' = 'font/ttf'; '.pfb' = 'application/octet-stream'
+        '.bcmap' = 'application/octet-stream'; '.gz' = 'application/gzip'; '.map' = 'application/json'; '.txt' = 'text/plain; charset=utf-8'
+        '.bin' = 'application/octet-stream'; '.spm' = 'application/octet-stream'
+    }
+    $res = $ctx.Response
+    $fs = $null
+    try {
+        $path = [System.Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
+        if ($path.EndsWith('/')) { $path += 'index.html' }
+        $file = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($rootFull, ($path.TrimStart('/') -replace '/', '\')))
+        # Solo file dentro la cartella dell'app
+        if (-not $file.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase) -or -not [System.IO.File]::Exists($file)) {
+            $res.StatusCode = 404
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes('Non trovato')
+            $res.ContentLength64 = $bytes.Length
+            $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        } else {
+            $ext = [System.IO.Path]::GetExtension($file).ToLowerInvariant()
+            $res.ContentType = $(if ($types.ContainsKey($ext)) { $types[$ext] } else { 'application/octet-stream' })
+            $res.Headers.Add('Cache-Control', 'no-cache')
+            $fs = [System.IO.File]::Open($file, 'Open', 'Read', 'Read')
+            $res.ContentLength64 = $fs.Length
+            $fs.CopyTo($res.OutputStream, 1048576)
+        }
+    } catch {
+        try { $res.StatusCode = 500 } catch { }
+    } finally {
+        if ($fs) { $fs.Dispose() }
+        try { $res.OutputStream.Close() } catch { }
+    }
+}
+
+$pool = [RunspaceFactory]::CreateRunspacePool(1, 8)
+$pool.Open()
+$jobs = New-Object System.Collections.ArrayList
+
 Write-Host ''
 Write-Host '  DocVerso e'' aperto nel browser:' -ForegroundColor Cyan
 Write-Host "  $url"
@@ -50,26 +101,17 @@ while ($listener.IsListening) {
     try {
         $ctx = $listener.GetContext()
     } catch { break }
-    $res = $ctx.Response
-    try {
-        $path = [System.Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
-        if ($path.EndsWith('/')) { $path += 'index.html' }
-        $file = [System.IO.Path]::GetFullPath((Join-Path $rootFull ($path.TrimStart('/') -replace '/', '\')))
-        # Solo file dentro la cartella dell'app
-        if (-not $file.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $file -PathType Leaf)) {
-            $res.StatusCode = 404
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes('Non trovato')
-        } else {
-            $ext = [System.IO.Path]::GetExtension($file).ToLowerInvariant()
-            $res.ContentType = $(if ($types.ContainsKey($ext)) { $types[$ext] } else { 'application/octet-stream' })
-            $res.Headers.Add('Cache-Control', 'no-cache')
-            $bytes = [System.IO.File]::ReadAllBytes($file)
+    $ps = [PowerShell]::Create()
+    $ps.RunspacePool = $pool
+    [void]$ps.AddScript($serve).AddArgument($ctx).AddArgument($rootFull)
+    [void]$jobs.Add(@{ ps = $ps; handle = $ps.BeginInvoke() })
+    # Libera le risposte già concluse
+    for ($i = $jobs.Count - 1; $i -ge 0; $i--) {
+        $j = $jobs[$i]
+        if ($j.handle.IsCompleted) {
+            try { [void]$j.ps.EndInvoke($j.handle) } catch { }
+            $j.ps.Dispose()
+            $jobs.RemoveAt($i)
         }
-        $res.ContentLength64 = $bytes.Length
-        $res.OutputStream.Write($bytes, 0, $bytes.Length)
-    } catch {
-        try { $res.StatusCode = 500 } catch { }
-    } finally {
-        try { $res.OutputStream.Close() } catch { }
     }
 }
