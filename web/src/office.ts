@@ -21,7 +21,12 @@ export const isPowerPoint = (name: string) => /\.(pptx?|pptm|ppsx?|odp)$/i.test(
 
 export async function officeToPdf(file: File, progress?: (d: number, t: number, m: string) => void): Promise<OutFile> {
   const ppt = isPowerPoint(file.name);
-  progress?.(0, 1, `Conversione con ${ppt ? 'PowerPoint' : 'Word'} del computer (alcuni secondi)…`);
+  const what = ppt ? 'PowerPoint' : 'Word';
+  const t0 = Date.now();
+  const tick = () => progress?.(0, 1, `Conversione con ${what} del computer… ${Math.round((Date.now() - t0) / 1000)} s` +
+    (Date.now() - t0 > 30000 ? ' (la prima volta Office può metterci di più; dopo 2 minuti si ferma e spiega perché)' : ''));
+  tick();
+  const timer = setInterval(tick, 1000);
   let r: Response;
   try {
     r = await fetch('api/office-pdf', {
@@ -31,8 +36,10 @@ export async function officeToPdf(file: File, progress?: (d: number, t: number, 
       signal: AbortSignal.timeout(300000),
     });
   } catch {
+    clearInterval(timer);
     throw new Error('Non riesco a contattare DocVerso sul computer: avvia l’app con DocVerso.bat e riprova.');
   }
+  finally { clearInterval(timer); }
   if (!r.ok) throw new Error((await r.text()) || 'La conversione in PDF non è riuscita.');
   const bytes = new Uint8Array(await r.arrayBuffer());
   return { name: `${baseName(file.name)}.pdf`, bytes, type: MIME.pdf };

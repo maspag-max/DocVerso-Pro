@@ -49,7 +49,7 @@ $url = $listener.Prefixes | Select-Object -First 1
 
 # Risposta a una richiesta: eseguita in un "runspace" separato, più richieste insieme
 $serve = {
-    param($ctx, $rootFull)
+    param($ctx, $rootFull, $scriptDir)
     $types = @{
         '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'
         '.css' = 'text/css; charset=utf-8'; '.json' = 'application/json'; '.wasm' = 'application/wasm'
@@ -80,63 +80,33 @@ $serve = {
         }
     }
 
-    # Conversione di un file in PDF; restituisce il percorso del PDF o lancia un errore con un messaggio chiaro
-    function Convert-ToPdf($in, $out, $conv) {
-        $ext = [System.IO.Path]::GetExtension($in).ToLowerInvariant()
-        $isWord = $ext -in '.doc', '.docx', '.docm', '.rtf', '.odt', '.dot', '.dotx'
-        $isPpt = $ext -in '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp'
-        # Una conversione alla volta: Office non ama essere comandato da più richieste insieme
+    # Messaggi nella finestra nera (dai runspace Write-Host non arriva alla finestra)
+    function Log($m) { try { [Console]::WriteLine("  " + (Get-Date -Format 'HH:mm:ss') + "  " + $m) } catch { } }
+
+    # Conversione in PDF in un processo a parte (office2pdf.ps1), con un tempo massimo: se Word o PowerPoint
+    # si bloccano (finestra nascosta di attivazione, primo avvio, licenza…) si chiudono e si spiega perché
+    function Convert-ToPdf($in, $out, $script) {
+        $officeNames = 'WINWORD', 'POWERPNT', 'soffice.bin'
+        $before = @(Get-Process -Name $officeNames -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
         $mutex = New-Object System.Threading.Mutex($false, 'DocVersoOfficePdf')
         [void]$mutex.WaitOne()
         try {
-            if ($isWord -and $conv.word) {
-                $app = $null; $doc = $null
-                try {
-                    $app = New-Object -ComObject Word.Application
-                    $app.Visible = $false
-                    $app.DisplayAlerts = 0                  # nessuna finestra di dialogo
-                    try { $app.AutomationSecurity = 3 } catch { }   # macro disattivate
-                    # Open(FileName, ConfirmConversions, ReadOnly, AddToRecentFiles)
-                    $doc = $app.Documents.Open($in, $false, $true, $false)
-                    $doc.ExportAsFixedFormat($out, 17)      # 17 = wdExportFormatPDF
-                } finally {
-                    if ($doc) { try { $doc.Close(0) } catch { }; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) }
-                    if ($app) {
-                        # Si chiude Word solo se non ci sono altri documenti aperti
-                        try { if ($app.Documents.Count -eq 0) { $app.Quit(0) } } catch { }
-                        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)
-                    }
-                }
-            } elseif ($isPpt -and $conv.powerpoint) {
-                $app = $null; $pres = $null
-                try {
-                    $app = New-Object -ComObject PowerPoint.Application
-                    try { $app.AutomationSecurity = 3 } catch { }
-                    # Open(FileName, ReadOnly = msoTrue, Untitled = msoFalse, WithWindow = msoFalse)
-                    $pres = $app.Presentations.Open($in, -1, 0, 0)
-                    $pres.SaveAs($out, 32)                  # 32 = ppSaveAsPDF
-                } finally {
-                    if ($pres) { try { $pres.Close() } catch { }; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($pres) }
-                    if ($app) {
-                        # PowerPoint è uno solo per tutto il computer: si chiude solo se non ha altre presentazioni aperte
-                        try { if ($app.Presentations.Count -eq 0) { $app.Quit() } } catch { }
-                        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)
-                    }
-                }
-            } elseif (($isWord -or $isPpt) -and $conv.libreoffice) {
-                $dir = [System.IO.Path]::GetDirectoryName($out)
-                $prof = 'file:///' + ((Join-Path $dir 'profilo') -replace '\\', '/')
-                $p = Start-Process -FilePath $conv.libreoffice -ArgumentList @("-env:UserInstallation=$prof", '--headless', '--convert-to', 'pdf', '--outdir', "`"$dir`"", "`"$in`"") -WindowStyle Hidden -PassThru -Wait
-                $made = Join-Path $dir ([System.IO.Path]::GetFileNameWithoutExtension($in) + '.pdf')
-                if ((Test-Path $made) -and $made -ne $out) { Move-Item -Force $made $out }
-            } else {
-                $what = $(if ($isPpt) { 'PowerPoint' } else { 'Word' })
-                throw "Per convertire in PDF serve Microsoft $what (o LibreOffice) installato su questo computer."
+            $p = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ArgumentList @(
+                '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"", "`"$in`"", "`"$out`"")
+            if (-not $p.WaitForExit(120000)) {
+                try { $p.Kill() } catch { }
+                # Si chiudono solo i Word/PowerPoint avviati per questa conversione, non quelli già aperti
+                Get-Process -Name $officeNames -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id } |
+                    ForEach-Object { try { $_.Kill() } catch { } }
+                throw ('Office non ha risposto entro 2 minuti: di solito aspetta una risposta in una finestra nascosta ' +
+                    '(attivazione, accesso all''account, primo avvio). Apri Word o PowerPoint una volta a mano, chiudi gli avvisi e riprova.')
             }
         } finally {
             $mutex.ReleaseMutex(); $mutex.Dispose()
         }
-        if (-not (Test-Path $out)) { throw 'La conversione in PDF non è riuscita: il file potrebbe essere protetto da password o danneggiato.' }
+        $err = "$out.errore.txt"
+        if (Test-Path $err) { throw ([System.IO.File]::ReadAllText($err)) }
+        if (-not (Test-Path $out)) { throw 'La conversione in PDF non è riuscita.' }
     }
 
     try {
@@ -162,14 +132,17 @@ $serve = {
                 $out = Join-Path $work 'documento.pdf'
                 $f = [System.IO.File]::Create($in)
                 try { $ctx.Request.InputStream.CopyTo($f) } finally { $f.Dispose() }
+                $t0 = Get-Date
+                Log "Conversione in PDF di $name…"
                 try {
-                    Convert-ToPdf $in $out (Get-Converters)
+                    Convert-ToPdf $in $out (Join-Path $scriptDir 'office2pdf.ps1')
                 } catch {
                     $msg = $_.Exception.Message
-                    if ($msg -notmatch '^(Per convertire|La conversione)') { $msg = "Office non è riuscito a convertire il file: $msg" }
+                    Log "  non riuscita: $msg"
                     Send-Text 500 $msg
                     return
                 }
+                Log ("  fatto in {0:0} secondi" -f ((Get-Date) - $t0).TotalSeconds)
                 $res.ContentType = 'application/pdf'
                 $fs = [System.IO.File]::OpenRead($out)
                 $res.ContentLength64 = $fs.Length
@@ -225,7 +198,7 @@ while ($listener.IsListening) {
     } catch { break }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $pool
-    [void]$ps.AddScript($serve).AddArgument($ctx).AddArgument($rootFull)
+    [void]$ps.AddScript($serve).AddArgument($ctx).AddArgument($rootFull).AddArgument($PSScriptRoot)
     [void]$jobs.Add(@{ ps = $ps; handle = $ps.BeginInvoke() })
     # Libera le risposte già concluse
     for ($i = $jobs.Count - 1; $i -ge 0; $i--) {
