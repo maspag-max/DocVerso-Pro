@@ -2,6 +2,8 @@
 # (indirizzo localhost, non raggiungibile da altri PC). Non servono diritti di amministratore.
 # Ogni richiesta è servita in parallelo (una richiesta lenta non blocca le altre); i file grandi
 # (modelli di traduzione) sono inviati a pezzi, senza caricarli tutti in memoria.
+# Word/PowerPoint → PDF: con Microsoft Office di questo computer (risultato identico a "Salva come PDF"),
+# oppure con LibreOffice se Office non c'è. I file restano sul computer (cartella temporanea, poi cancellati).
 # Si chiude chiudendo la sua finestra.
 
 $ErrorActionPreference = 'Stop'
@@ -58,8 +60,127 @@ $serve = {
     }
     $res = $ctx.Response
     $fs = $null
+
+    function Send-Text($code, $text, $type = 'text/plain; charset=utf-8') {
+        $res.StatusCode = $code
+        $res.ContentType = $type
+        $b = [System.Text.Encoding]::UTF8.GetBytes($text)
+        $res.ContentLength64 = $b.Length
+        $res.OutputStream.Write($b, 0, $b.Length)
+    }
+
+    # Programmi disponibili per la conversione in PDF
+    function Get-Converters {
+        $lo = @("$env:ProgramFiles\LibreOffice\program\soffice.exe", "${env:ProgramFiles(x86)}\LibreOffice\program\soffice.exe") |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+        [pscustomobject]@{
+            word        = Test-Path 'Registry::HKEY_CLASSES_ROOT\Word.Application\CLSID'
+            powerpoint  = Test-Path 'Registry::HKEY_CLASSES_ROOT\PowerPoint.Application\CLSID'
+            libreoffice = $lo
+        }
+    }
+
+    # Conversione di un file in PDF; restituisce il percorso del PDF o lancia un errore con un messaggio chiaro
+    function Convert-ToPdf($in, $out, $conv) {
+        $ext = [System.IO.Path]::GetExtension($in).ToLowerInvariant()
+        $isWord = $ext -in '.doc', '.docx', '.docm', '.rtf', '.odt', '.dot', '.dotx'
+        $isPpt = $ext -in '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp'
+        # Una conversione alla volta: Office non ama essere comandato da più richieste insieme
+        $mutex = New-Object System.Threading.Mutex($false, 'DocVersoOfficePdf')
+        [void]$mutex.WaitOne()
+        try {
+            if ($isWord -and $conv.word) {
+                $app = $null; $doc = $null
+                try {
+                    $app = New-Object -ComObject Word.Application
+                    $app.Visible = $false
+                    $app.DisplayAlerts = 0                  # nessuna finestra di dialogo
+                    try { $app.AutomationSecurity = 3 } catch { }   # macro disattivate
+                    # Open(FileName, ConfirmConversions, ReadOnly, AddToRecentFiles)
+                    $doc = $app.Documents.Open($in, $false, $true, $false)
+                    $doc.ExportAsFixedFormat($out, 17)      # 17 = wdExportFormatPDF
+                } finally {
+                    if ($doc) { try { $doc.Close(0) } catch { }; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) }
+                    if ($app) {
+                        # Si chiude Word solo se non ci sono altri documenti aperti
+                        try { if ($app.Documents.Count -eq 0) { $app.Quit(0) } } catch { }
+                        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+                    }
+                }
+            } elseif ($isPpt -and $conv.powerpoint) {
+                $app = $null; $pres = $null
+                try {
+                    $app = New-Object -ComObject PowerPoint.Application
+                    try { $app.AutomationSecurity = 3 } catch { }
+                    # Open(FileName, ReadOnly = msoTrue, Untitled = msoFalse, WithWindow = msoFalse)
+                    $pres = $app.Presentations.Open($in, -1, 0, 0)
+                    $pres.SaveAs($out, 32)                  # 32 = ppSaveAsPDF
+                } finally {
+                    if ($pres) { try { $pres.Close() } catch { }; [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($pres) }
+                    if ($app) {
+                        # PowerPoint è uno solo per tutto il computer: si chiude solo se non ha altre presentazioni aperte
+                        try { if ($app.Presentations.Count -eq 0) { $app.Quit() } } catch { }
+                        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+                    }
+                }
+            } elseif (($isWord -or $isPpt) -and $conv.libreoffice) {
+                $dir = [System.IO.Path]::GetDirectoryName($out)
+                $prof = 'file:///' + ((Join-Path $dir 'profilo') -replace '\\', '/')
+                $p = Start-Process -FilePath $conv.libreoffice -ArgumentList @("-env:UserInstallation=$prof", '--headless', '--convert-to', 'pdf', '--outdir', "`"$dir`"", "`"$in`"") -WindowStyle Hidden -PassThru -Wait
+                $made = Join-Path $dir ([System.IO.Path]::GetFileNameWithoutExtension($in) + '.pdf')
+                if ((Test-Path $made) -and $made -ne $out) { Move-Item -Force $made $out }
+            } else {
+                $what = $(if ($isPpt) { 'PowerPoint' } else { 'Word' })
+                throw "Per convertire in PDF serve Microsoft $what (o LibreOffice) installato su questo computer."
+            }
+        } finally {
+            $mutex.ReleaseMutex(); $mutex.Dispose()
+        }
+        if (-not (Test-Path $out)) { throw 'La conversione in PDF non è riuscita: il file potrebbe essere protetto da password o danneggiato.' }
+    }
+
     try {
         $path = [System.Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
+
+        # --- Che cosa può convertire in PDF questo computer
+        if ($path -eq '/api/office-status') {
+            $c = Get-Converters
+            Send-Text 200 ("{""word"":$($c.word.ToString().ToLower()),""powerpoint"":$($c.powerpoint.ToString().ToLower()),""libreoffice"":$(([bool]$c.libreoffice).ToString().ToLower())}") 'application/json'
+            return
+        }
+
+        # --- Word/PowerPoint → PDF: il file arriva nel corpo della richiesta, il PDF torna nella risposta
+        if ($path -eq '/api/office-pdf' -and $ctx.Request.HttpMethod -eq 'POST') {
+            $work = Join-Path ([System.IO.Path]::GetTempPath()) ('DocVerso-' + [guid]::NewGuid().ToString('N'))
+            [void](New-Item -ItemType Directory -Path $work)
+            try {
+                $name = [System.Uri]::UnescapeDataString([string]$ctx.Request.Headers['X-Nome-File'])
+                $ext = [System.IO.Path]::GetExtension($name).ToLowerInvariant()
+                $allowed = '.doc', '.docx', '.docm', '.rtf', '.odt', '.dot', '.dotx', '.ppt', '.pptx', '.pptm', '.pps', '.ppsx', '.odp'
+                if ($ext -notin $allowed) { Send-Text 400 'Formato non supportato: scegli un file Word o PowerPoint.'; return }
+                $in = Join-Path $work ('documento' + $ext)
+                $out = Join-Path $work 'documento.pdf'
+                $f = [System.IO.File]::Create($in)
+                try { $ctx.Request.InputStream.CopyTo($f) } finally { $f.Dispose() }
+                try {
+                    Convert-ToPdf $in $out (Get-Converters)
+                } catch {
+                    $msg = $_.Exception.Message
+                    if ($msg -notmatch '^(Per convertire|La conversione)') { $msg = "Office non è riuscito a convertire il file: $msg" }
+                    Send-Text 500 $msg
+                    return
+                }
+                $res.ContentType = 'application/pdf'
+                $fs = [System.IO.File]::OpenRead($out)
+                $res.ContentLength64 = $fs.Length
+                $fs.CopyTo($res.OutputStream, 1048576)
+            } finally {
+                if ($fs) { $fs.Dispose(); $fs = $null }
+                Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+            }
+            return
+        }
+
         if ($path.EndsWith('/')) { $path += 'index.html' }
         $file = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($rootFull, ($path.TrimStart('/') -replace '/', '\')))
         # Solo file dentro la cartella dell'app
@@ -85,6 +206,7 @@ $serve = {
 }
 
 $pool = [RunspaceFactory]::CreateRunspacePool(1, 8)
+$pool.ApartmentState = 'STA'   # richiesto dagli oggetti COM di Office
 $pool.Open()
 $jobs = New-Object System.Collections.ArrayList
 

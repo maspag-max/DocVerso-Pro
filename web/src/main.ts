@@ -3,6 +3,7 @@ import { baseName, imagesToDocx, imagesToPdf, pdfToDocx, pdfToImages, type OutFi
 import { getOcr, ocrAvailable } from './ocr';
 import { AUTO, LANGUAGES, makeTranslate, translationAvailable } from './translate';
 import { docxTranslate } from './docx';
+import { officeStatus, officeToPdf, type OfficeStatus } from './office';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -20,15 +21,17 @@ try { savedTheme = localStorage.getItem('docverso-theme') ?? 'auto'; } catch { /
 setTheme(savedTheme, false);
 
 // ------------------------------------------------------------------ file scelti
-type Kind = 'pdf' | 'docx' | 'image';
+type Kind = 'pdf' | 'docx' | 'word' | 'ppt' | 'image';
 const kindOf = (f: File): Kind | null => {
   const n = f.name.toLowerCase();
   if (f.type === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
   if (n.endsWith('.docx')) return 'docx';
+  if (/\.(doc|docm|rtf|odt|dotx?)$/.test(n)) return 'word';
+  if (/\.(pptx?|pptm|ppsx?|odp)$/.test(n)) return 'ppt';
   if (f.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif|tiff?)$/.test(n)) return 'image';
   return null;
 };
-const KIND_LABEL: Record<Kind, string> = { pdf: 'PDF', docx: 'Word', image: 'Immagine' };
+const KIND_LABEL: Record<Kind, string> = { pdf: 'PDF', docx: 'Word', word: 'Word', ppt: 'PowerPoint', image: 'Immagine' };
 
 let files: File[] = [];
 
@@ -46,7 +49,7 @@ function addFiles(list: FileList | File[]) {
   const docs = files.filter(f => kindOf(f) !== 'image');
   if (docs.length > 0) files = [docs[docs.length - 1]];
   $('files-hint').textContent = rejected.length
-    ? `Non posso convertire ${rejected.join(', ')}: scegli PDF, Word (.docx) o immagini.`
+    ? `Non posso convertire ${rejected.join(', ')}: scegli PDF, Word, PowerPoint o immagini.`
     : files.length > 1 ? 'Le immagini vanno nel documento in quest’ordine: usa le frecce per cambiarlo.' : '';
   render();
 }
@@ -82,7 +85,8 @@ window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files && !drop.contains(e.target as Node)) addFiles(e.dataTransfer.files); });
 
 // ------------------------------------------------------------------ conversioni possibili
-interface Choice { id: string; title: string; text: string; needs?: 'ocr' | 'translate'; extra?: 'dpi' | 'page' | 'lang' }
+// Se l'Office del computer risulta mancante, la scelta "PDF" resta visibile ma disattivata, con il motivo
+interface Choice { id: string; title: string; text: string; needs?: 'ocr' | 'translate' | 'word' | 'powerpoint'; extra?: 'dpi' | 'page' | 'lang' }
 
 function choicesFor(): Choice[] {
   if (files.length === 0) return [];
@@ -95,7 +99,14 @@ function choicesFor(): Choice[] {
     { id: 'pdf-png', title: 'Immagini PNG', text: 'Una per pagina, senza perdita di qualità: adatte ai testi piccoli.', extra: 'dpi' },
   ];
   if (k === 'docx') return [
+    { id: 'office-pdf', title: 'PDF', text: 'Con Word di questo computer: identico a “Salva come PDF”.', needs: 'word' },
     { id: 'docx-tr', title: 'Word tradotto', text: 'Cambia solo il testo: stili, tabelle, immagini, intestazioni e piè di pagina restano identici.', needs: 'translate', extra: 'lang' },
+  ];
+  if (k === 'word') return [
+    { id: 'office-pdf', title: 'PDF', text: 'Con Word di questo computer: identico a “Salva come PDF”.', needs: 'word' },
+  ];
+  if (k === 'ppt') return [
+    { id: 'office-pdf', title: 'PDF', text: 'Con PowerPoint di questo computer: una pagina per diapositiva, identica a “Salva come PDF”.', needs: 'powerpoint' },
   ];
   return [
     { id: 'img-pdf', title: n > 1 ? `Un PDF con ${n} pagine` : 'PDF', text: 'Una pagina per immagine, nell’ordine dell’elenco.', extra: 'page' },
@@ -104,7 +115,20 @@ function choicesFor(): Choice[] {
   ];
 }
 
-const available = (c: Choice) => (c.needs !== 'ocr' || ocrAvailable) && (c.needs !== 'translate' || (translationAvailable && (c.id !== 'img-word-tr' || ocrAvailable)));
+let office: OfficeStatus | null = null;
+const officeOk = (n: 'word' | 'powerpoint') => !!office && (office[n] || office.libreoffice);
+const available = (c: Choice) => (c.needs !== 'ocr' || ocrAvailable) && (c.needs !== 'translate' || (translationAvailable && (c.id !== 'img-word-tr' || ocrAvailable)))
+  && (c.needs !== 'word' || officeOk('word')) && (c.needs !== 'powerpoint' || officeOk('powerpoint'));
+/** Perché una scelta non è disponibile. */
+function why(c: Choice): string {
+  if (c.needs === 'word' || c.needs === 'powerpoint') {
+    if (!office) return 'Disponibile quando DocVerso è avviato con DocVerso.bat.';
+    return `Serve Microsoft ${c.needs === 'word' ? 'Word' : 'PowerPoint'} (o LibreOffice) installato su questo computer.`;
+  }
+  return 'In preparazione: arriverà con il prossimo aggiornamento.';
+}
+// Office del computer: si chiede al server locale all'avvio, poi si aggiornano le scelte
+officeStatus().then(s => { office = s; render(); });
 let selected = '';
 const prefs = { dpi: 200, page: 'a4' as PageSize, from: AUTO, to: 'it' };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('docverso-prefs') ?? '{}')); } catch { /* idem */ }
@@ -146,7 +170,9 @@ function render() {
     const lab = document.createElement('label'); lab.className = 'choice';
     lab.innerHTML = `<input type="radio" name="choice" value="${c.id}"${c.id === selected ? ' checked' : ''}${ok ? '' : ' disabled'}><span><b></b><small></small></span>`;
     lab.querySelector('b')!.textContent = c.title;
-    lab.querySelector('small')!.textContent = ok ? c.text : 'In preparazione: arriverà con il prossimo aggiornamento.';
+    // Senza Office ma con LibreOffice: lo si dice (il risultato è molto simile, non sempre identico)
+    const viaLibre = ok && office && (c.needs === 'word' || c.needs === 'powerpoint') && !office[c.needs];
+    lab.querySelector('small')!.textContent = !ok ? why(c) : viaLibre ? 'Con LibreOffice di questo computer (Office non è installato): molto simile all’originale.' : c.text;
     lab.querySelector('input')!.addEventListener('change', () => { selected = c.id; renderExtra(c); });
     fs.append(lab);
   }
@@ -172,6 +198,7 @@ async function run(): Promise<OutFile[]> {
     case 'pdf-word-tr': return [await pdfToDocx(f, { ocr: getOcr(prefs.from), translate: translate(), suffix: langSuffix(), progress })];
     case 'pdf-jpg': return [await pdfToImages(f, 'jpg', prefs.dpi, progress)];
     case 'pdf-png': return [await pdfToImages(f, 'png', prefs.dpi, progress)];
+    case 'office-pdf': return [await officeToPdf(f, progress)];
     case 'docx-tr': return [await docxTranslate(f, translate(), langSuffix(), progress)];
     case 'img-pdf': return [await imagesToPdf(files, prefs.page, progress)];
     case 'img-word': return [await imagesToDocx(files, { ocr: getOcr(prefs.from), progress })];

@@ -14,6 +14,12 @@ Cosa resta sul computer
 - Per le altre lingue serve internet la prima volta (circa 35 MB per lingua); dopo il modello
   resta nella cache del browser. Alcune reti aziendali bloccano questo download.
 
+Word e PowerPoint -> PDF
+- La conversione usa Microsoft Word / PowerPoint installati su questo computer (stesso risultato
+  di "Salva come PDF"); se Office non c'è, usa LibreOffice. Il file viene copiato in una cartella
+  temporanea del computer e cancellato subito dopo.
+- Se Word o PowerPoint sono già aperti non vengono chiusi.
+
 Se non parte
 - Se Windows mostra "PC protetto da Windows", scegli "Ulteriori informazioni" e poi "Esegui comunque".
 - Il server usa l'indirizzo http://localhost:8765 (o una delle porte successive se è occupata):

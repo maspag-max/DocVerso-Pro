@@ -15,6 +15,7 @@ Windows, senza diritti di amministratore) serve l'app su http://localhost:8765 e
 - PDF → Word fedele (tabelle dalle linee, testo in posizione, immagini e codici a barre ancorati), con o senza traduzione
 - Word → Word tradotto (impaginazione intatta)
 - JPEG/PNG → PDF o Word (OCR con Tesseract.js)
+- Word e PowerPoint → PDF con Office del computer (server locale di DocVerso.bat, automazione COM; ripiego LibreOffice)
 - PDF → JPEG/PNG, più immagini → un PDF
 
 ## Come funziona
