@@ -10,6 +10,7 @@
 import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator/translator.js';
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
+import { gemmaSupports, gemmaTranslate, loadGemma } from './gemma';
 import { glossaryEnabled, loadGlossaryText, parseGlossary, protect, restore } from './glossary';
 
 export const AUTO = 'auto';
@@ -168,7 +169,10 @@ function getTranslator(from: string, to: string) {
 }
 
 /** Traduttore da [from] (o rilevata dal testo, se AUTO) a [to]. [status] riceve i messaggi d'attesa. */
-export function makeTranslate(from: string, to: string, status: (m: string) => void): TranslateBatch {
+export type Engine = 'veloce' | 'accurata';
+
+/** Traduttore da [from] (o rilevata dal testo, se AUTO) a [to]. [engine]: Bergamot (veloce) o TranslateGemma (accurata). */
+export function makeTranslate(from: string, to: string, status: (m: string) => void, engine: Engine = 'veloce'): TranslateBatch {
   return async (texts, progress) => {
     let src = from;
     if (src === AUTO) {
@@ -178,15 +182,26 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
       src = d;
     }
     if (src === to) throw new Error(`Il documento è già in ${languageName(to).toLowerCase()}.`);
+    const accurate = engine === 'accurata';
+    if (accurate && !(gemmaSupports(src) && gemmaSupports(to))) throw new Error(`La traduzione accurata non è disponibile per ${languageName(src).toLowerCase()} → ${languageName(to).toLowerCase()}: usa la traduzione veloce.`);
     onBytes = (d, t) => status(t > 0 && d >= t ? `Caricamento del modello ${languageName(src)} → ${languageName(to)}…` :`Scarico il modello ${languageName(src)} → ${languageName(to)} (solo la prima volta): ${Math.round(d / 1048576)}${t ? ` di ${Math.round(t / 1048576)}` : ''} MB`);
     stage = (m: string) => status(m);
-    status(`Ricerca del modello ${languageName(src)} → ${languageName(to)}…`);
-    const tr = getTranslator(src, to);
+    let one: (text: string) => Promise<string>;
+    if (accurate) {
+      status('Preparazione della traduzione accurata…');
+      const g = await loadGemma(status);
+      // La scheda grafica traduce un paragrafo alla volta: coda
+      let queue: Promise<unknown> = Promise.resolve();
+      one = text => { const r = queue.then(() => gemmaTranslate(g, text, src, to)); queue = r.catch(() => {}); return r; };
+    } else {
+      status(`Ricerca del modello ${languageName(src)} → ${languageName(to)}…`);
+      const tr = getTranslator(src, to);
+      one = text => tr.translate({ from: src, to, text, html: false }).then(r => r.target.text as string);
+    }
     let done = 0;
     // Glossario (solo inglese ↔ italiano): termini fissi protetti da segnaposti
     const pair = (src === 'en' && to === 'it') || (src === 'it' && to === 'en');
     const terms = pair && glossaryEnabled() ? parseGlossary(loadGlossaryText()) : [];
-    const one = (text: string) => tr.translate({ from: src, to, text, html: false }).then(r => r.target.text as string);
     /** Una frase col glossario: parole vicarie, poi sigle ZQX, poi senza glossario. */
     const withGlossary = async (text: string, split: boolean): Promise<string> => {
       const p = protect(text, terms, src as 'en' | 'it');
@@ -199,11 +214,17 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
       const q = protect(text, terms, src as 'en' | 'it', 'token');
       return restore(await one(q.text), q, to as 'en' | 'it') ?? one(text);
     };
+    const t0 = performance.now();
     try {
       return await Promise.all(texts.map(async text => {
         const out = terms.length ? await withGlossary(text, true) : await one(text);
         done++; progress?.(done, texts.length);
-        if (done === 1) status(`Traduzione ${languageName(src)} → ${languageName(to)}: ${texts.length} frasi…`);
+        if (accurate) {
+          // Stima del tempo che manca (la traduzione accurata è lenta)
+          const per = (performance.now() - t0) / done;
+          const left = Math.round(per * (texts.length - done) / 60000);
+          status(`Traduzione accurata ${languageName(src)} → ${languageName(to)}: ${done} di ${texts.length} paragrafi${done < texts.length ? ` (mancano circa ${left < 1 ? 'meno di un minuto' : left === 1 ? 'un minuto' : left + ' minuti'})` : ''}`);
+        } else if (done === 1) status(`Traduzione ${languageName(src)} → ${languageName(to)}: ${texts.length} frasi…`);
         return out;
       }));
     } catch (e) {

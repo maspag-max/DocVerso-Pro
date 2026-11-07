@@ -1,7 +1,7 @@
 import './style.css';
 import { baseName, imagesToDocx, imagesToPdf, pdfToDocx, pdfToImages, type OutFile, type PageSize } from './convert';
 import { getOcr, ocrAvailable } from './ocr';
-import { AUTO, LANGUAGES, makeTranslate, translationAvailable } from './translate';
+import { AUTO, LANGUAGES, makeTranslate, translationAvailable, type Engine } from './translate';
 import { DEFAULT_GLOSSARY, glossaryEnabled, loadGlossaryText, parseGlossary, saveGlossaryText, setGlossaryEnabled } from './glossary';
 import { docxTranslate } from './docx';
 import { officeStatus, officeToPdf, type OfficeStatus } from './office';
@@ -131,7 +131,7 @@ function why(c: Choice): string {
 // Office del computer: si chiede al server locale all'avvio, poi si aggiornano le scelte
 officeStatus().then(s => { office = s; render(); });
 let selected = '';
-const prefs = { dpi: 200, page: 'a4' as PageSize, from: AUTO, to: 'it' };
+const prefs = { dpi: 200, page: 'a4' as PageSize, from: AUTO, to: 'it', engine: 'veloce' as Engine };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('docverso-prefs') ?? '{}')); } catch { /* idem */ }
 const savePrefs = () => { try { localStorage.setItem('docverso-prefs', JSON.stringify(prefs)); } catch { /* idem */ } };
 
@@ -154,6 +154,7 @@ function renderExtra(c: Choice | undefined) {
     const langs = LANGUAGES.map(l => [l.code, l.name] as [string, string]);
     box.append(select('Da', [[AUTO, 'Rileva automaticamente'], ...langs], prefs.from, v => { prefs.from = v; savePrefs(); }));
     box.append(select('A', langs, prefs.to, v => { prefs.to = v; savePrefs(); }));
+    box.append(select('Traduzione', [['veloce', 'Veloce (Bergamot)'], ['accurata', 'Accurata (TranslateGemma, lenta)']], prefs.engine, v => { prefs.engine = v as Engine; savePrefs(); }));
     box.append(glossaryBox());
   }
 }
@@ -220,7 +221,7 @@ const langSuffix = () => prefs.to.toUpperCase();
 async function run(): Promise<OutFile[]> {
   const f = files[0];
   const status = (m: string) => progress(0, 1, m);
-  const translate = () => makeTranslate(prefs.from, prefs.to, status);
+  const translate = () => makeTranslate(prefs.from, prefs.to, status, prefs.engine);
   switch (selected) {
     case 'pdf-word': return [await pdfToDocx(f, { ocr: getOcr(prefs.from), progress })];
     case 'pdf-word-tr': return [await pdfToDocx(f, { ocr: getOcr(prefs.from), translate: translate(), suffix: langSuffix(), progress })];

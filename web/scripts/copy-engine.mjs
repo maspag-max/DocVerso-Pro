@@ -31,3 +31,9 @@ mkdirSync(berg, { recursive: true });
 for (const f of ['translator-worker.js', 'bergamot-translator-worker.js', 'bergamot-translator-worker.wasm'])
   cpSync(new URL('@mkljczk/bergamot-translator/worker/' + f, nm), new URL(f, berg));
 console.log('Traduzione copiata in public/bergamot');
+
+// ONNX Runtime per la traduzione accurata (TranslateGemma): servito dall'app, niente CDN
+const ort = new URL('../public/ort/', import.meta.url);
+mkdirSync(ort, { recursive: true });
+for (const f of ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm']) cpSync(new URL('onnxruntime-web/dist/' + f, nm), new URL(f, ort));
+console.log('ONNX Runtime copiato in public/ort');
