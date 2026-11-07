@@ -129,19 +129,21 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
     const full = mul(mul(tm, st.ctm), VT);
     const sx = Math.hypot(full[0], full[1]);
     const sy = Math.hypot(full[2], full[3]);
-    // Testo ruotato (non orizzontale): non si riproduce in posizione (come in TradScan)
+    // Testo dritto
     const horizontal = Math.abs(full[1]) < 0.02 * sx && full[0] > 0 && Math.abs(full[2]) < 0.02 * sy && full[3] < 0; // y verso il basso: testo dritto ha d < 0
+    // Testo ruotato di un quarto di giro (intestazioni verticali): 90 = dal basso in alto, 270 = dall'alto in basso
+    const rot = horizontal ? 0 : Math.abs(full[0]) < 0.02 * sx && Math.abs(full[3]) < 0.02 * sy ? (full[1] < 0 ? 90 : 270) : 0;
     let x = 0;
     for (const g of items) {
       if (typeof g === 'number') { x += (vertical ? 1 : -1) * g * size / 1000; continue; }
       const spacing = (g.isSpace ? st.wordSpacing : 0) + st.charSpacing;
       const adv = (g.width ?? 0) * fm[0] * size;
-      if (!vertical && horizontal && !invisible && glyphs.length < MAX_GLYPHS) {
+      if (!vertical && (horizontal || rot) && !invisible && glyphs.length < MAX_GLYPHS) {
         const ch: string = symbolChar(g.unicode ?? '', fonts[idx].name);
-        if (!ch) missing++;
+        if (!ch) { if (horizontal) missing++; }
         else {
           const [px, py] = apply(full, tx + x * st.hScale, ty + st.rise);
-          glyphs.push({ ch, x: px, base: py, w: Math.abs(adv * st.hScale * sx), size: size * sy, font: idx, color: (st.fill ?? 0) & 0xffffff });
+          glyphs.push({ ch, x: px, base: py, w: Math.abs(adv * st.hScale * sx), size: size * sy, font: idx, color: (st.fill ?? 0) & 0xffffff, ...(rot ? { rot } : {}) });
         }
       }
       x += vertical ? adv - spacing * dir : adv + spacing * dir;

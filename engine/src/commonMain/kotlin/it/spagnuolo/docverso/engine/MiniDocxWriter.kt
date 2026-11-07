@@ -169,6 +169,7 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         sect = s
         val anchors = StringBuilder()
         for (a in p.anchors) anchors.append(anchor(a))
+        for (t in p.boxes) anchors.append(textBox(t))
         // Fasce della pagina (una o due colonne): ogni fascia è una sezione; la prima comincia la pagina,
         // le altre continuano sulla stessa pagina
         var first = true
@@ -284,7 +285,9 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         val n = images.size
         val id = ++anchorId
         val emu = { pt: Float -> (pt * 12700.0).roundToLong().coerceAtLeast(1L) }
-        body.append("<w:p><w:pPr><w:spacing w:before=\"${tw(p.beforePt)}\" w:after=\"0\" w:line=\"${tw(p.h + 1f)}\" w:lineRule=\"exact\"/>")
+        // Interlinea singola (non esatta): con l'interlinea esatta Word e LibreOffice tagliano la parte alta
+        // dell'immagine (la poggiano sulla linea di base, a circa l'80% della riga)
+        body.append("<w:p><w:pPr><w:spacing w:before=\"${tw(p.beforePt)}\" w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/>")
             .append("<w:ind w:left=\"${tw(p.x)}\" w:right=\"0\" w:firstLine=\"0\"/><w:jc w:val=\"left\"/><w:rPr><w:sz w:val=\"2\"/></w:rPr></w:pPr>").append(extra)
             .append("<w:r><w:rPr><w:sz w:val=\"2\"/></w:rPr><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"${emu(p.w)}\" cy=\"${emu(p.h)}\"/>")
             .append("<wp:docPr id=\"$id\" name=\"Figura $id\"/>").append(graphic(n, ext, emu(p.w), emu(p.h))).append("</wp:inline></w:drawing></w:r></w:p>")
@@ -307,12 +310,33 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
             "</wp:anchor></w:drawing></w:r>"
     }
 
+    /** Casella di testo verticale ferma sulla pagina (testo ruotato dell'originale), senza bordo né sfondo. */
+    private fun textBox(t: DocItem.TextBox): String {
+        val id = ++anchorId
+        val emu = { pt: Float -> (pt * 12700.0).roundToLong().coerceAtLeast(1L) }
+        val size = t.runs.maxOfOrNull { it.sizePt } ?: 10f
+        val runs = t.runs.joinToString("") { r -> "<w:r>" + rPr(r) + "<w:t xml:space=\"preserve\">" + escape(r.text) + "</w:t></w:r>" }
+        return "<w:r><mc:AlternateContent><mc:Choice Requires=\"wps\"><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" " +
+            "relativeHeight=\"${251658240 + id}\" behindDoc=\"0\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\"><wp:simplePos x=\"0\" y=\"0\"/>" +
+            "<wp:positionH relativeFrom=\"page\"><wp:posOffset>${emu(t.x)}</wp:posOffset></wp:positionH>" +
+            "<wp:positionV relativeFrom=\"page\"><wp:posOffset>${emu(t.y)}</wp:posOffset></wp:positionV>" +
+            "<wp:extent cx=\"${emu(t.w)}\" cy=\"${emu(t.h)}\"/><wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/>" +
+            "<wp:docPr id=\"$id\" name=\"Testo $id\"/><wp:cNvGraphicFramePr/>" +
+            "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\">" +
+            "<wps:wsp><wps:cNvSpPr txBox=\"1\"/><wps:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"${emu(t.w)}\" cy=\"${emu(t.h)}\"/></a:xfrm>" +
+            "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>" +
+            "<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"${tw(size * 1.15f)}\" w:lineRule=\"exact\"/>" +
+            "<w:jc w:val=\"${if (t.upward) "left" else "left"}\"/></w:pPr>$runs</w:p></w:txbxContent></wps:txbx>" +
+            "<wps:bodyPr rot=\"0\" vert=\"${if (t.upward) "vert270" else "vert"}\" wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" anchor=\"t\" anchorCtr=\"0\"><a:noAutofit/></wps:bodyPr>" +
+            "</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice><mc:Fallback/></mc:AlternateContent></w:r>"
+    }
+
     /** File del pacchetto Word (nome, contenuto): vanno messi in un archivio zip, in quest'ordine. */
     fun parts(title: String): List<Pair<String, ByteArray>> {
         if (pages == 0) body.append("<w:p/>")
         val last = (sect ?: defaultSect).xml()
         val document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>$body$last</w:body></w:document>"""
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" mc:Ignorable="w14"><w:body>$body$last</w:body></w:document>"""
 
         val styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="it-IT"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>"""

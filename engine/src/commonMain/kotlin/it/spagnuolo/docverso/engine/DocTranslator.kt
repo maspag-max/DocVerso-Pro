@@ -111,7 +111,7 @@ class DocTranslator(private val raw: (String) -> String) {
             }
             from = i + 1
         }
-        return DocItem.ExactPage(p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, min(p.marginB, 2f), out, p.anchors)
+        return DocItem.ExactPage(p.widthPt, p.heightPt, p.marginL, p.marginT, p.marginR, min(p.marginB, 2f), out, p.anchors, p.boxes.map { b -> DocItem.TextBox(b.x, b.y, b.w, b.h, runs(b.runs), b.upward) })
     }
 
     /** Paragrafo di testo che va a capo (più righe nell'originale), non un'etichetta o un pezzo di riga. */

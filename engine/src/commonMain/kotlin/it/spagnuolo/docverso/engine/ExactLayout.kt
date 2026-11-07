@@ -18,7 +18,8 @@ object ExactLayout {
     class Font(val name: String, val bold: Boolean, val italic: Boolean)
 
     /** Lettera: [x] sinistra, [base] linea di base, [w] larghezza, [size] corpo in punti. */
-    class Glyph(val ch: String, val x: Float, val base: Float, val w: Float, val size: Float, val font: Int, val color: Int)
+    /** [rot] = 0 testo dritto, 90 dal basso in alto, 270 dall'alto in basso; per il testo ruotato [x] è la linea di base. */
+    class Glyph(val ch: String, val x: Float, val base: Float, val w: Float, val size: Float, val font: Int, val color: Int, val rot: Int = 0)
 
     /** Riquadro pieno (le linee sottili sono riquadri sottili). [color] 0xRRGGBB. */
     class Box(val l: Float, val t: Float, val r: Float, val b: Float, val color: Int = 0) {
@@ -192,7 +193,68 @@ object ExactLayout {
                 }
             }
         }
-        return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors)
+        return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors, rotated(page))
+    }
+
+    /**
+     * Testo ruotato di 90° (intestazioni verticali delle colonne di una tabella): lettere sulla stessa linea
+     * di base verticale, in ordine di lettura, spezzate dove c'è un vuoto grande → caselle di testo verticali.
+     */
+    private fun rotated(page: Page): List<DocItem.TextBox> {
+        val out = ArrayList<DocItem.TextBox>()
+        for (rot in listOf(90, 270)) {
+            val up = rot == 90
+            val gs = page.glyphs.filter { it.rot == rot && it.size > 0.5f }
+            if (gs.isEmpty()) continue
+            // Righe: stessa linea di base (x)
+            val rows = ArrayList<ArrayList<Glyph>>()
+            for (g in gs.sortedBy { it.x }) {
+                val row = rows.lastOrNull()
+                if (row != null && abs(g.x - row[0].x) <= 0.3f * min(g.size, row[0].size)) row += g else rows += arrayListOf(g)
+            }
+            for (row in rows) {
+                // In ordine di lettura: verso l'alto la y cala
+                row.sortBy { if (up) -it.base else it.base }
+                var cur = ArrayList<Glyph>()
+                fun flush() {
+                    val vis = cur.filter { it.ch.isNotBlank() }
+                    if (vis.isEmpty()) { cur = ArrayList(); return }
+                    val size = vis.maxOf { it.size }
+                    val runs = ArrayList<DocItem.Run>()
+                    var prevEnd = Float.NaN
+                    for (g in vis) {
+                        val start = g.base
+                        val gap = if (prevEnd.isNaN()) 0f else if (up) prevEnd - start else start - prevEnd
+                        val f = page.fonts.getOrNull(g.font)
+                        val text = (if (gap > 0.15f * g.size) " " else "") + g.ch
+                        val run = DocItem.Run(text, family(f?.name), roundSize(g.size), f?.bold == true, f?.italic == true, g.color)
+                        val last = runs.lastOrNull()
+                        if (last != null && last.copy(text = "") == run.copy(text = "")) runs[runs.size - 1] = last.copy(text = last.text + text) else runs += run
+                        prevEnd = if (up) g.base - g.w else g.base + g.w
+                    }
+                    val a = vis.first().base; val b = if (up) vis.last().base - vis.last().w else vis.last().base + vis.last().w
+                    val x0 = row[0].x
+                    // Verso l'alto le lettere stanno a sinistra della linea di base, verso il basso a destra
+                    val l = if (up) x0 - size * 0.8f else x0 - size * 0.3f
+                    // Casella più lunga del testo (caratteri di misure appena diverse non devono andare a capo),
+                    // allungata dalla parte in cui il testo finisce: l'inizio resta al suo posto
+                    val len = abs(b - a)
+                    val extra = len * 0.15f + size * 2f
+                    val top = if (up) min(a, b) - extra else min(a, b) - size * 0.1f
+                    out += DocItem.TextBox(l, top, size * 1.1f, len + extra + size * 0.1f, runs, up)
+                    cur = ArrayList()
+                }
+                var prevEnd = Float.NaN
+                for (g in row) {
+                    val gap = if (prevEnd.isNaN()) 0f else if (up) prevEnd - g.base else g.base - prevEnd
+                    if (cur.isNotEmpty() && gap > 1.5f * g.size) flush()
+                    cur += g
+                    prevEnd = if (up) g.base - g.w else g.base + g.w
+                }
+                flush()
+            }
+        }
+        return out
     }
 
     /**
@@ -490,7 +552,7 @@ object ExactLayout {
 
     /** Lettere → parole (spezza dove c'è spazio o cambia la riga). */
     private fun words(page: Page): List<Word> {
-        val gs = page.glyphs.filter { it.ch.isNotBlank() && it.size > 0.5f }.sortedWith(compareBy({ it.base }, { it.x }))
+        val gs = page.glyphs.filter { it.rot == 0 && it.ch.isNotBlank() && it.size > 0.5f }.sortedWith(compareBy({ it.base }, { it.x }))
         // Prima le righe (stessa linea di base), poi le parole lungo la riga
         val rows = ArrayList<ArrayList<Glyph>>()
         for (g in gs) {

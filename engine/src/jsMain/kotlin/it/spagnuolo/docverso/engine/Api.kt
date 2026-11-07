@@ -8,7 +8,7 @@ package it.spagnuolo.docverso.engine
 external interface JsFont { val name: String; val bold: Boolean; val italic: Boolean }
 
 /** Lettera: [x] sinistra, [base] linea di base, [w] larghezza, [size] corpo; tutto in punti, origine in alto a sinistra. */
-external interface JsGlyph { val ch: String; val x: Double; val base: Double; val w: Double; val size: Double; val font: Int; val color: Int }
+external interface JsGlyph { val ch: String; val x: Double; val base: Double; val w: Double; val size: Double; val font: Int; val color: Int; val rot: Int? }
 
 /** Riquadro pieno (linea sottile o sfondo) con colore 0xRRGGBB. */
 external interface JsBox { val l: Double; val t: Double; val r: Double; val b: Double; val color: Int? }
@@ -35,7 +35,7 @@ class DocPart(val name: String, val data: ByteArray)
 private fun JsPage.toPage() = ExactLayout.Page(
     w.toFloat(), h.toFloat(),
     fonts.map { ExactLayout.Font(it.name, it.bold, it.italic) },
-    glyphs.map { ExactLayout.Glyph(it.ch, it.x.toFloat(), it.base.toFloat(), it.w.toFloat(), it.size.toFloat(), it.font, it.color) },
+    glyphs.map { ExactLayout.Glyph(it.ch, it.x.toFloat(), it.base.toFloat(), it.w.toFloat(), it.size.toFloat(), it.font, it.color, it.rot ?: 0) },
     fills.map { ExactLayout.Box(it.l.toFloat(), it.t.toFloat(), it.r.toFloat(), it.b.toFloat(), it.color ?: 0) },
     art.map { ExactLayout.Box(it.l.toFloat(), it.t.toFloat(), it.r.toFloat(), it.b.toFloat()) },
     pics.map { ExactLayout.Pic(it.jpeg, it.l.toFloat(), it.t.toFloat(), it.r.toFloat(), it.b.toFloat(), it.behind) },

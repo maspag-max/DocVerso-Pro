@@ -4,7 +4,7 @@
 export type KBytes = Int8Array;
 
 export interface JsFont { name: string; bold: boolean; italic: boolean }
-export interface JsGlyph { ch: string; x: number; base: number; w: number; size: number; font: number; color: number }
+export interface JsGlyph { ch: string; x: number; base: number; w: number; size: number; font: number; color: number; rot?: number }
 export interface JsBox { l: number; t: number; r: number; b: number; color?: number | null }
 export interface JsPic { jpeg: KBytes; l: number; t: number; r: number; b: number; behind: boolean }
 export interface JsPage { w: number; h: number; fonts: JsFont[]; glyphs: JsGlyph[]; fills: JsBox[]; art: JsBox[]; pics: JsPic[] }

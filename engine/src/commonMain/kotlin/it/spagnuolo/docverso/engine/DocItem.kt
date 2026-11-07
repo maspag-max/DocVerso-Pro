@@ -41,7 +41,12 @@ sealed interface DocItem {
         val marginL: Float, val marginT: Float, val marginR: Float, val marginB: Float,
         val blocks: List<Block>,
         val anchors: List<Anchor>,
+        /** Testo ruotato (intestazioni verticali delle tabelle, scritte a margine): caselle di testo ferme sulla pagina. */
+        val boxes: List<TextBox> = emptyList(),
     ) : DocItem
+
+    /** Casella di testo verticale: [upward] = si legge dal basso in alto (ruotato di 90° a sinistra). */
+    class TextBox(val x: Float, val y: Float, val w: Float, val h: Float, val runs: List<Run>, val upward: Boolean)
 
     /** Pezzo di testo con il suo stile. [font] = famiglia di caratteri Word (es. "Arial"). */
     data class Run(
