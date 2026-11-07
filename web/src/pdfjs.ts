@@ -23,7 +23,7 @@ export async function openPdf(bytes: Uint8Array) {
     await worker.promise;
   } catch (e) {
     worker.destroy(); worker = null;
-    throw new Error('Non riesco a caricare una parte di DocVerso: la finestra nera di DocVerso è ancora aperta? Se l\'hai chiusa, riavvia DocVerso.bat e ricarica la pagina (F5).', { cause: e });
+    throw new Error('Non riesco a caricare una parte di DocVerso: la finestra nera di DocVerso Pro è ancora aperta? Se l\'hai chiusa, riavvia DocVerso-Pro.bat e ricarica la pagina (F5).', { cause: e });
   }
   return pdfjs.getDocument({
     worker,

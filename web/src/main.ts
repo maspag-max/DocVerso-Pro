@@ -263,7 +263,7 @@ $('go').addEventListener('click', async () => {
     const msg = e instanceof Error ? e.message : '';
     // Parti dell'app che non arrivano dal server locale (di solito la finestra nera è stata chiusa)
     err.textContent = /Failed to fetch|dynamically imported module|NetworkError|Importing a module script failed/i.test(msg)
-      ? 'Non riesco a contattare DocVerso sul computer: la finestra nera di DocVerso è ancora aperta? Se l’hai chiusa, riavvia DocVerso.bat e ricarica la pagina (F5).'
+      ? 'Non riesco a contattare DocVerso Pro sul computer: la finestra nera di DocVerso Pro è ancora aperta? Se l’hai chiusa, riavvia DocVerso-Pro.bat e ricarica la pagina (F5).'
       : msg || `Non sono riuscito a convertire ${baseName(files[0]?.name ?? '')}.`;
     err.hidden = false;
   } finally {
