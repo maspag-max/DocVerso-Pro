@@ -332,3 +332,35 @@ export function restore(translated: string, p: Protected, to: 'en' | 'it'): stri
   }
   return out + translated.slice(last);
 }
+
+// ------------------------------------------------------------------ per la traduzione accurata
+
+/**
+ * TranslateGemma capisce anche la lingua d'arrivo: invece dei segnaposti (che reinterpreta) si scrive il
+ * termine già tradotto dentro la frase d'origine; il modello lo tiene e ci concorda articoli e aggettivi.
+ * [quoted]: termini da mettere tra «» (secondo tentativo, se al primo il modello li ha ritradotti).
+ */
+export function inject(text: string, terms: Term[], from: 'en' | 'it', to: 'en' | 'it', quoted = new Set<Term>()) {
+  const p = protect(text, terms, from, 'token');
+  const used: Term[] = [];
+  const out = p.text.replace(TOKEN_RE, (_, k) => {
+    const { term, caps } = p.terms[+k];
+    used.push(term);
+    const w = caps === 'upper' ? term[to].toUpperCase() : term[to];
+    return quoted.has(term) ? `«${w}»` : w;
+  });
+  return { text: out, used };
+}
+
+/** Termini inseriti che nella traduzione non compaiono più (il modello li ha ritradotti o tolti). */
+export function missingTerms(translated: string, used: Term[], to: 'en' | 'it'): Term[] {
+  const low = translated.toLowerCase().replace(/[’]/g, "'");
+  return [...new Set(used)].filter(t => !low.includes(t[to].toLowerCase()));
+}
+
+/** Toglie le «» aggiunte da [inject] (solo attorno ai termini messi tra virgolette da noi). */
+export function unquote(translated: string, quoted: Set<Term>, to: 'en' | 'it'): string {
+  let s = translated;
+  for (const t of quoted) s = s.replace(new RegExp(`[«"“]\\s*(${esc(t[to])})\\s*[»"”]`, 'giu'), '$1');
+  return s;
+}

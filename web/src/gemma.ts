@@ -8,6 +8,8 @@ import type { TextGenerationPipeline } from '@huggingface/transformers';
 
 export const GEMMA_ID = 'onnx-community/translategemma-text-4b-it-ONNX';
 const LOCAL_DIR = 'modelli/translategemma/';
+/** Peso dei file del modello (q4): config, tokenizer, onnx e i due file di dati. */
+const GEMMA_BYTES = 3_111_894_696;
 
 /** Codici di lingua di TranslateGemma (quelli con variante regionale vogliono la regione). */
 const CODES: Record<string, string> = {
@@ -33,10 +35,12 @@ export function loadGemma(status: (m: string) => void): Promise<TextGenerationPi
     const { pipeline, env } = await import('@huggingface/transformers');
     // Prima la copia nel pacchetto (funziona anche senza internet e dietro il proxy dell'ufficio)
     const local = new URL(import.meta.env.BASE_URL + LOCAL_DIR, location.href).href;
-    const hasLocal = await fetch(local + GEMMA_ID + '/config.json', { method: 'HEAD' }).then(r => r.ok, () => false);
+    const hasLocal = await fetch(local + GEMMA_ID + '/config.json').then(r => r.ok, () => false);
     env.localModelPath = local;
     env.allowLocalModels = hasLocal;
     env.allowRemoteModels = !hasLocal;
+    // Con la copia locale non serve duplicarla (3 GB) nella cache del browser
+    env.useBrowserCache = !hasLocal;
     const ort = new URL(import.meta.env.BASE_URL + 'ort/', location.href).href;
     env.backends.onnx.wasm!.wasmPaths = { mjs: ort + 'ort-wasm-simd-threaded.asyncify.mjs', wasm: ort + 'ort-wasm-simd-threaded.asyncify.wasm' };
     const loaded = new Map<string, [number, number]>();
@@ -47,9 +51,10 @@ export function loadGemma(status: (m: string) => void): Promise<TextGenerationPi
       progress_callback: (e: any) => {
         if (e.status !== 'progress' || !e.total) return;
         loaded.set(e.file, [e.loaded, e.total]);
-        let d = 0, t = 0;
-        for (const [a, b] of loaded.values()) { d += a; t += b; }
-        const pct = Math.floor(d / t * 100);
+        // I file arrivano uno dopo l'altro: la percentuale si calcola sul peso totale noto del modello
+        let d = 0;
+        for (const [a] of loaded.values()) d += a;
+        const pct = Math.min(100, Math.floor(d / GEMMA_BYTES * 100));
         if (pct !== lastPct) {
           lastPct = pct;
           status(hasLocal ? `Caricamento del modello di traduzione accurata: ${pct}%` : `Scarico il modello di traduzione accurata (circa 3 GB, solo la prima volta): ${pct}%`);

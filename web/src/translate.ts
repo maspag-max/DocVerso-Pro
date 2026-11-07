@@ -11,7 +11,7 @@ import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
 import { gemmaSupports, gemmaTranslate, loadGemma } from './gemma';
-import { glossaryEnabled, loadGlossaryText, parseGlossary, protect, restore } from './glossary';
+import { glossaryEnabled, inject, loadGlossaryText, missingTerms, parseGlossary, protect, restore, unquote } from './glossary';
 
 export const AUTO = 'auto';
 export const translationAvailable = true;
@@ -204,6 +204,17 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     const terms = pair && glossaryEnabled() ? parseGlossary(loadGlossaryText()) : [];
     /** Una frase col glossario: parole vicarie, poi sigle ZQX, poi senza glossario. */
     const withGlossary = async (text: string, split: boolean): Promise<string> => {
+      if (accurate) {
+        // TranslateGemma: termini già tradotti dentro il testo; se ne ritraduce qualcuno, si riprova con «»
+        const a = inject(text, terms, src as 'en' | 'it', to as 'en' | 'it');
+        if (!a.used.length) return one(text);
+        const first = await one(a.text);
+        const miss = missingTerms(first, a.used, to as 'en' | 'it');
+        if (!miss.length) return first;
+        const quoted = new Set(miss);
+        const second = unquote(await one(inject(text, terms, src as 'en' | 'it', to as 'en' | 'it', quoted).text), quoted, to as 'en' | 'it');
+        return missingTerms(second, a.used, to as 'en' | 'it').length < miss.length ? second : first;
+      }
       const p = protect(text, terms, src as 'en' | 'it');
       if (!p.terms.length) return one(text);
       const r = restore(await one(p.text), p, to as 'en' | 'it');
@@ -239,4 +250,4 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
 }
 
 /** Solo per le prove automatiche: traduzione diretta di un elenco di frasi. */
-(globalThis as any).docversoTranslate = (from: string, to: string, texts: string[]) => makeTranslate(from, to, () => {})(texts);
+(globalThis as any).docversoTranslate = (from: string, to: string, texts: string[], engine: Engine = 'veloce') => makeTranslate(from, to, m => console.log(m), engine)(texts);

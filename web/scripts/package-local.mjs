@@ -17,7 +17,7 @@ const models = join(web, 'models-cache');
 if (existsSync(models)) for (const pair of readdirSync(models)) for (const f of readdirSync(join(models, pair)))
   files[`DocVerso/app/modelli/${pair}/${f}`] = readFileSync(join(models, pair, f));
 else console.warn('Attenzione: senza modelli di traduzione (node scripts/fetch-models.mjs)');
-for (const f of ['DocVerso.bat', 'server.ps1', 'office2pdf.ps1', 'LEGGIMI.txt']) files['DocVerso/' + f] = readFileSync(join(local, f));
+for (const f of ['DocVerso.bat', 'server.ps1', 'office2pdf.ps1', 'ScaricaModelloAccurato.bat', 'LEGGIMI.txt']) files['DocVerso/' + f] = readFileSync(join(local, f));
 const out = process.argv[2] ?? join(web, 'DocVerso-locale.zip');
 writeFileSync(out, zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, k.includes('/modelli/') ? [v, { level: 1 }] : v])), { level: 6 }));
 console.log(`${out}: ${Object.keys(files).length} file, ${(statSync(out).size / 1048576).toFixed(1)} MB`);
