@@ -1,5 +1,6 @@
 package it.spagnuolo.docverso.engine
 
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -190,13 +191,16 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         }
     }
 
-    private fun rPr(r: DocItem.Run): String = buildString {
+    private fun rPr(r: DocItem.Run, condensePt: Float = 0f): String = buildString {
         append("<w:rPr>")
         r.font?.let { val f = escape(it); append("<w:rFonts w:ascii=\"$f\" w:hAnsi=\"$f\" w:cs=\"$f\" w:eastAsia=\"$f\"/>") }
         if (r.bold) append("<w:b/><w:bCs/>")
         if (r.italic) append("<w:i/><w:iCs/>")
         if (r.underline) append("<w:u w:val=\"single\"/>")
         if (r.color and 0xFFFFFF != 0) append("<w:color w:val=\"${hex(r.color)}\"/>")
+        val sp = (condensePt * 20f).roundToInt()
+        if (sp != 0) append("<w:spacing w:val=\"$sp\"/>")
+        if (abs(r.raisePt) >= 0.5f) append("<w:position w:val=\"${(r.raisePt * 2f).roundToInt()}\"/>")
         val hp = (r.sizePt * 2f).roundToInt().coerceAtLeast(2)
         append("<w:sz w:val=\"$hp\"/><w:szCs w:val=\"$hp\"/></w:rPr>")
     }
@@ -233,7 +237,7 @@ class MiniDocxWriter(private val pageWidthMm: Float = 210f, private val pageHeig
         body.append("<w:p><w:pPr>").append(pPr).append("</w:pPr>").append(extra)
         p.pieces.forEachIndexed { k, piece ->
             if (k > 0) body.append("<w:r>").append(rPr(piece.runs.firstOrNull() ?: DocItem.Run("", null, markSize))).append("<w:tab/></w:r>")
-            for (r in piece.runs) body.append("<w:r>").append(rPr(r)).append("<w:t xml:space=\"preserve\">").append(escape(r.text)).append("</w:t></w:r>")
+            for (r in piece.runs) body.append("<w:r>").append(rPr(r, p.condensePt)).append("<w:t xml:space=\"preserve\">").append(escape(r.text)).append("</w:t></w:r>")
         }
         body.append("</w:p>")
     }

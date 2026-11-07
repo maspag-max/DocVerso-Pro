@@ -48,6 +48,8 @@ sealed interface DocItem {
         val text: String, val font: String?, val sizePt: Float,
         val bold: Boolean = false, val italic: Boolean = false, val color: Int = 0,
         val underline: Boolean = false,
+        /** Spostamento in alto (apice, positivo) o in basso (pedice, negativo), in punti. */
+        val raisePt: Float = 0f,
     )
 
     /** Allineamento di un pezzo di riga: a sinistra, centrato o a destra della posizione [Piece.x]. */
@@ -73,6 +75,8 @@ sealed interface DocItem {
         val frame: FloatArray? = null,
         /** Rientro della prima riga rispetto alle altre (positivo = più a destra). */
         val firstLinePt: Float = 0f,
+        /** Spaziatura dei caratteri (negativa = più stretti): testo giustificato con spazi compressi (LaTeX). */
+        val condensePt: Float = 0f,
     ) : Block
 
     /**

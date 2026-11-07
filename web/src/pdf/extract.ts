@@ -69,6 +69,8 @@ interface State {
   ctm: M; fill: number | null; stroke: number | null; lineWidth: number;
   fontId: string | null; fontSize: number; charSpacing: number; wordSpacing: number; hScale: number;
   leading: number; rise: number; renderMode: number;
+  /** Ritaglio attivo (rettangolo che lo contiene) e se ha una forma diversa da un rettangolo. */
+  clip: JsBox | null; clipShaped: boolean;
 }
 
 export async function extractPage(page: PDFPageProxy, OPS: Record<string, number>, opt: ExtractOptions): Promise<Extracted> {
@@ -84,8 +86,9 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
   let missing = 0;
   const pageArea = vp.width * vp.height;
 
-  let st: State = { ctm: [1, 0, 0, 1, 0, 0], fill: 0, stroke: 0, lineWidth: 1, fontId: null, fontSize: 0, charSpacing: 0, wordSpacing: 0, hScale: 1, leading: 0, rise: 0, renderMode: 0 };
+  let st: State = { ctm: [1, 0, 0, 1, 0, 0], fill: 0, stroke: 0, lineWidth: 1, fontId: null, fontSize: 0, charSpacing: 0, wordSpacing: 0, hScale: 1, leading: 0, rise: 0, renderMode: 0, clip: null, clipShaped: false };
   const stack: State[] = [];
+  let pendingClip = false;
   // Stato del testo (non fa parte dello stato grafico salvato)
   let tm: M = [1, 0, 0, 1, 0, 0];
   let tx = 0, ty = 0, lx = 0, ly = 0;
@@ -221,6 +224,14 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
     if (!src || imageJobs.length >= MAX_IMAGES) return;
     const b = imageBox();
     if (b.r - b.l < 2 || b.b - b.t < 2) return;
+    // Immagine ritagliata da una forma (loghi fatti di pezzi, foto in un riquadro sagomato): l'immagine intera
+    // sarebbe sbagliata, quindi si prende la zona dalla pagina disegnata
+    if (st.clip) {
+      const c = st.clip;
+      const v = { l: Math.max(b.l, c.l), t: Math.max(b.t, c.t), r: Math.min(b.r, c.r), b: Math.min(b.b, c.b) };
+      if (v.r - v.l < 1 || v.b - v.t < 1) return;
+      if (st.clipShaped || (v.r - v.l) * (v.b - v.t) < 0.9 * (b.r - b.l) * (b.b - b.t)) { addArt(v); return; }
+    }
     const behind = (b.r - b.l) * (b.b - b.t) > pageArea * 0.85;
     const order = imageJobs.length;
     imageJobs.push(Promise.resolve(src)
@@ -277,9 +288,23 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
       case OPS.showText: case OPS.showSpacedText: showText(a[0]); break;
       case OPS.nextLineShowText: tx = lx; ty = ly += st.leading; showText(a[0]); break;
       case OPS.nextLineSetSpacingShowText: st.wordSpacing = a[0]; st.charSpacing = a[1]; tx = lx; ty = ly += st.leading; showText(a[2]); break;
+      case OPS.clip: case OPS.eoClip: pendingClip = true; break;
       case OPS.constructPath: {
         const paint = a[0];
         const data = a[1]?.[0];
+        if (pendingClip && data) {
+          pendingClip = false;
+          const { subs, curves } = paths(data);
+          const pts = subs.flat();
+          if (pts.length) {
+            const box = bbox(pts);
+            // Rettangolo allineato agli assi? (4 angoli, eventualmente ripetuto il primo)
+            const rect = !curves && subs.length === 1 && pts.length <= 5 && pts.every(([x, y]) => (Math.abs(x - box.l) < 0.5 || Math.abs(x - box.r) < 0.5) && (Math.abs(y - box.t) < 0.5 || Math.abs(y - box.b) < 0.5));
+            const c = st.clip;
+            st.clip = c ? { l: Math.max(c.l, box.l), t: Math.max(c.t, box.t), r: Math.min(c.r, box.r), b: Math.min(c.b, box.b) } : box;
+            st.clipShaped = st.clipShaped || !rect;
+          }
+        }
         if (!data || paint === OPS.endPath) break;
         const { subs, curves } = paths(data);
         const closeIt = paint === OPS.closeStroke || paint === OPS.closeFillStroke || paint === OPS.closeEOFillStroke;

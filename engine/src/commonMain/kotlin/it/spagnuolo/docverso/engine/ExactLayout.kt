@@ -82,7 +82,12 @@ object ExactLayout {
             val c = pad(a, 0.5f, page)
             crop(c)?.let { pictures += DocItem.Anchor(it, isPng(it), c.l, c.t, c.w, c.h, behind = false) }
         }
-        for (p in page.pics) pictures += DocItem.Anchor(p.jpeg, false, p.l, p.t, p.r - p.l, p.b - p.t, behind = p.behind)
+        // Le zone prese dalla pagina disegnata contengono già le immagini che ci stanno dentro: un'immagine
+        // dentro una di queste zone non va rimessa sopra (coprirebbe il disegno, es. un fondo bianco sotto un logo)
+        for (p in page.pics) {
+            if (!p.behind && artBoxes.any { a -> p.l >= a.l - 1f && p.r <= a.r + 1f && p.t >= a.t - 1f && p.b <= a.b + 1f }) continue
+            pictures += DocItem.Anchor(p.jpeg, false, p.l, p.t, p.r - p.l, p.b - p.t, behind = p.behind)
+        }
 
         // --- Griglie (tabelle) dalle linee che si toccano
         underlined.clear()
@@ -177,10 +182,10 @@ object ExactLayout {
                     if (gap > 0.5f && markAt >= 0) { blocks.add(markAt, DocItem.Para(emptyList(), 0f, gap)); cursor += gap }
                     val (lb, le) = flow(itemsOf(leftLines, lGrids, lPics), colL, colLR, cursor, (colL + colLR) / 2f, text, page.fonts, inGrid)
                     val (rb, re) = flow(itemsOf(rightLines, rGrids, rPics), colRL, textR, cursor, (colRL + textR) / 2f, text, page.fonts, inGrid)
-                    blocks += lb
+                    blocks += topSpacer(lb)
                     if (lb.isEmpty() || lb.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
                     blocks += DocItem.ColumnBreak
-                    blocks += rb
+                    blocks += topSpacer(rb)
                     if (rb.isEmpty() || rb.last() is DocItem.Grid) blocks += DocItem.Para(emptyList(), 0f, 0.6f)
                     blocks += DocItem.SectionMark(listOf(colLR - colL, textR - colRL), listOf(max(colRL - colLR, 4f)))
                     cursor = max(le, re)
@@ -188,6 +193,22 @@ object ExactLayout {
             }
         }
         return DocItem.ExactPage(page.w, page.h, mL, mT, mR, mB, blocks, anchors)
+    }
+
+    /**
+     * Spazio vuoto in cima a una colonna: un paragrafo vuoto alto quanto lo spazio, non uno "spazio prima"
+     * del primo paragrafo (LibreOffice lo applica a tutta la sezione e sposta in basso anche l'altra colonna).
+     */
+    private fun topSpacer(bs: List<DocItem.Block>): List<DocItem.Block> {
+        val first = bs.firstOrNull() ?: return bs
+        val gap = when (first) { is DocItem.Para -> if (first.frame == null) first.beforePt else 0f; is DocItem.InlinePic -> first.beforePt; else -> 0f }
+        if (gap < 1f) return bs
+        val head = when (first) {
+            is DocItem.Para -> first.copy(beforePt = 0f)
+            is DocItem.InlinePic -> DocItem.InlinePic(first.bytes, first.png, first.x, first.w, first.h, 0f)
+            else -> first
+        }
+        return listOf(DocItem.Para(emptyList(), 0f, gap), head) + bs.drop(1)
     }
 
     private class Item(val top: Float, val line: TLine? = null, val grid: GridShape? = null, val pic: DocItem.Anchor? = null)
@@ -282,20 +303,37 @@ object ExactLayout {
                 }
                 val bodyL = group[1].l
                 val colRight = group.dropLast(1).maxOf { it.r }
-                val justify = group.size > 2 && group.dropLast(1).all { abs(it.r - colRight) < 1.5f }
+                // Tolleranza: LaTeX (microtype) sporge un poco a destra con trattini e punteggiatura
+                val tolJ = max(1.5f, 0.3f * size)
+                // Due righe piene fino al bordo della colonna (paragrafo che continua nella colonna dopo): giustificato
+                val justify = (group.size > 2 && group.dropLast(1).all { abs(it.r - colRight) < tolJ }) ||
+                    (group.size == 2 && group.all { abs(it.r - colR) < tolJ })
                 // Margine destro con un po' di tolleranza: con caratteri di misure appena diverse l'ultima
                 // parola della riga non deve andare a capo (la parola dopo, intera, comunque non ci sta)
                 // Word usa corpi a mezzi punti: un 9,96 diventa 10 e la riga si allunga un poco; si compensa con
                 // un margine destro appena più largo (anche oltre la colonna, di pochi decimi di punto)
-                val grow = (roundSize(size) / size - 1f).coerceAtLeast(0f) * (colRight - bodyL) + 1f
+                // Spazi compressi (LaTeX li stringe sotto la larghezza normale, Word no): si stringono un poco
+                // i caratteri, così in ogni riga entrano le stesse parole dell'originale
+                val condense = if (!justify) 0f else {
+                    var short = 0f; var chars = 0
+                    for (ln in group.dropLast(1)) {
+                        val ws = ln.segs.flatMap { it.words }
+                        val natural = ws.sumOf { w -> w.glyphs.sumOf { it.w.toDouble() } }.toFloat() + (ws.size - 1) * 0.25f * ln.size
+                        short += max(0f, natural - (ln.r - ln.l)); chars += ws.sumOf { it.glyphs.size } + ws.size - 1
+                    }
+                    if (chars == 0) 0f else (-short / chars).coerceIn(-0.4f, 0f).let { if (it > -0.02f) 0f else it }
+                }
+                // Più un margine dello 0,5%: caratteri di misure appena diverse (Palatino di Windows / URW Palladio,
+                // crenatura) non devono far andare a capo una parola che nell originale ci stava
+                val grow = (roundSize(size) / size - 1f).coerceAtLeast(0f) * (colRight - bodyL) + 0.005f * (colRight - bodyL) + 1f
                 val right = if (justify) -grow else (colR - colRight - max(0.8f * size, grow)).coerceAtLeast(-grow)
                 blocks += if (bullet) DocItem.Para(
                     // Elenco: pallino, tabulazione, testo; le righe dopo allineate al testo (rientro sporgente)
                     listOf(DocItem.Piece(bodyL - colL, line.segs[0].runs(fonts)), DocItem.Piece(bodyL - colL, mergeRuns(runs))), before, lineH,
-                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL,
+                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL, condensePt = condense,
                 ) else DocItem.Para(
                     listOf(DocItem.Piece(bodyL - colL, mergeRuns(runs))), before, lineH,
-                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL,
+                    rightPt = right, justify = justify, firstLinePt = line.l - bodyL, condensePt = condense,
                 )
             } else {
                 blocks += lineBlock(line, before, lineH, colL, colR, centerX, fonts)
@@ -337,17 +375,23 @@ object ExactLayout {
         val minL = words.minOf { it.l }; val maxR = words.maxOf { it.r }
         fun median(v: List<Float>) = if (v.isEmpty()) 0f else v.sorted()[v.size / 2]
         var best: Split? = null; var bestScore = 0f
-        var x = pageW * 0.3f
-        while (x <= pageW * 0.7f) {
+        // Anche colonne disuguali: colonna stretta di note a margine accanto al testo (riviste MDPI, Elsevier…)
+        var x = pageW * 0.2f
+        while (x <= pageW * 0.8f) {
             var cross = 0
             val lw = ArrayList<Float>(); val rw = ArrayList<Float>()
+            var tabular = 0
+            // Parte di riga fatta di pezzi staccati (colonne di una tabella senza linee): non è testo di una colonna
+            fun pieces(ws: List<Word>, size: Float) = ws.sortedBy { it.l }.zipWithNext().count { (a, b) -> b.l - a.r > 2f * size }
             for (ln in rows) {
                 if (crosses(ln, x)) { cross++; continue }
                 val ws = ln.segs.flatMap { it.words }
                 val l = ws.filter { it.r <= x }; val r = ws.filter { it.l >= x }
                 if (l.isNotEmpty()) lw += l.maxOf { it.r } - l.minOf { it.l }
                 if (r.isNotEmpty()) rw += r.maxOf { it.r } - r.minOf { it.l }
+                if (pieces(l, ln.size) >= 2 || pieces(r, ln.size) >= 2) tabular++
             }
+            if (tabular > (lw.size + rw.size) * 0.15f) { x += 2f; continue }
             cross += grids.count { it.xs.first() < x - 2f && it.xs.last() > x + 2f }
             // Vere colonne di testo: righe che riempiono buona parte della colonna da entrambe le parti
             // (non un indice con i numeri di pagina a destra, né etichette e valori di un modulo)
@@ -387,8 +431,19 @@ object ExactLayout {
         // seguono la fascia più vicina, sopra o sotto, fra quelle certe (larghe o con testo da entrambe le parti)
         val sure = bands.map { b -> b.wide || b.grid != null || (b.words.any { it.cx < gx } && b.words.any { it.cx >= gx }) }
         val wideOf = BooleanArray(bands.size) { bands[it].wide }
+        // Bordo sinistro della colonna destra (dalle righe che stanno sicuramente su due colonne)
+        val rightLs = bands.indices.filter { sure[it] && !bands[it].wide && bands[it].grid == null }
+            .mapNotNull { k -> bands[k].words.filter { it.cx >= gx }.minOfOrNull { it.l } }.sorted()
+        val rightColL = rightLs.getOrNull(rightLs.size / 2)
         for (k in bands.indices) {
             if (sure[k]) continue
+            // Riga tutta nella colonna destra, che parte dal suo bordo (o rientrata come un capoverso): è testo
+            // della colonna destra con la sinistra vuota accanto (es. il riassunto accanto alla colonna delle note).
+            // Una riga di una fascia larga non può stare tutta a destra partendo da lì (comincia dal margine sinistro).
+            val ws = bands[k].words
+            if (rightColL != null && ws.isNotEmpty() && ws.all { it.cx >= gx } && ws.minOf { it.l } - rightColL in -2f..25f) {
+                wideOf[k] = false; continue
+            }
             val p = (k - 1 downTo 0).firstOrNull { sure[it] }
             val n = (k + 1 until bands.size).firstOrNull { sure[it] }
             val gp = p?.let { bands[k].top - bands[it].bottom } ?: Float.MAX_VALUE
@@ -470,6 +525,8 @@ object ExactLayout {
 
     /** Pezzo di riga: parole vicine. */
     private class Seg(val words: List<Word>) {
+        /** Linea di base della riga: le parole più in alto o più in basso sono apici o pedici. */
+        var base = Float.NaN
         val l get() = words.first().l
         val r get() = words.last().r
         /** [single] = un solo spazio fra le parole (testo che Word rimanda a capo, anche giustificato). */
@@ -483,11 +540,12 @@ object ExactLayout {
                     val prev = out.removeAt(out.size - 1)
                     out += prev.copy(text = prev.text + " ".repeat(n))
                 }
+                val raise = if (base.isNaN() || abs(base - w.base) < 0.12f * w.size) 0f else ((base - w.base) * 2f).roundToInt() / 2f
                 for (g in w.glyphs) {
                     val f = fonts.getOrNull(g.font)
-                    val run = DocItem.Run(g.ch, family(f?.name), roundSize(g.size), f?.bold == true, f?.italic == true, g.color, g in underlined)
+                    val run = DocItem.Run(g.ch, family(f?.name), roundSize(g.size), f?.bold == true, f?.italic == true, g.color, g in underlined, raise)
                     val last = out.lastOrNull()
-                    if (last != null && last.font == run.font && last.sizePt == run.sizePt && last.bold == run.bold && last.italic == run.italic && last.color == run.color && last.underline == run.underline)
+                    if (last != null && last.copy(text = "") == run.copy(text = ""))
                         out[out.size - 1] = last.copy(text = last.text + g.ch)
                     else out += run
                 }
@@ -499,7 +557,7 @@ object ExactLayout {
     private class TLine(val segs: List<Seg>) {
         val l get() = segs.first().l
         val r get() = segs.last().r
-        val base = segs.flatMap { it.words }.map { it.base }.sorted().let { it[it.size / 2] }
+        val base = segs.first().base.takeUnless { it.isNaN() } ?: segs.flatMap { it.words }.map { it.base }.sorted().let { it[it.size / 2] }
         val size = segs.flatMap { it.words }.maxOf { it.size }
         val top get() = segs.flatMap { it.words }.minOf { it.top }
         val bottom get() = segs.flatMap { it.words }.maxOf { it.bottom }
@@ -512,18 +570,35 @@ object ExactLayout {
             val row = rows.lastOrNull()
             if (row != null && abs(w.base - row[0].base) <= 0.35f * min(w.size, row[0].size)) row += w else rows += arrayListOf(w)
         }
+        // Apici e pedici (numeri delle note, affiliazioni, unità di misura): parole piccole un po' più in alto o
+        // in basso di una riga di testo più grande che le contiene in altezza → stessa riga
+        val mainRows = rows.filter { r -> r.maxOf { it.size } > 0f }
+        for (row in rows.toList()) {
+            val small = row.maxOf { it.size }
+            val host = mainRows.filter { h -> h !== row && h.isNotEmpty() }.firstOrNull { h ->
+                val big = h.maxOf { it.size }
+                val hb = h.map { it.base }.sorted()[h.size / 2]
+                small < big * 0.85f && abs(row[0].base - hb) < big * 0.55f &&
+                    row.all { w -> h.any { o -> w.l < o.r + big * 1.0f && w.r > o.l - big * (if (row.sumOf { it.text.length } <= 3) 1.6f else 1.0f) } }
+            } ?: continue
+            host += row; row.clear()
+        }
+        rows.removeAll { it.isEmpty() }
         return rows.map { row ->
             row.sortBy { it.l }
             // Testo giustificato (colonne strette): gli spazi fra le parole sono larghi ma tutti simili;
             // un pezzo di riga separato (modulo, tabulazione) ha uno spazio molto più largo degli altri
             val gaps = row.zipWithNext { a, b -> b.l - a.r }.filter { it > 0f }.sorted()
-            val typical = if (gaps.size >= 3) 2.2f * gaps[gaps.size / 2] else 0f
+            val sizeRow = row.maxOf { it.size }
+            // (solo se lo spazio tipico è uno spazio fra parole, non le colonne di una tabella senza linee)
+            val typical = if (gaps.size >= 3 && gaps[gaps.size / 2] < 0.8f * sizeRow) 2.2f * gaps[gaps.size / 2] else 0f
             val segs = ArrayList<ArrayList<Word>>()
             for (w in row) {
                 val s = segs.lastOrNull()
                 if (s != null && w.l - s.last().r < max(max(1.2f * max(w.size, s.last().size), 6f), typical)) s += w else segs += arrayListOf(w)
             }
-            TLine(segs.map { Seg(it) })
+            val base = row.filter { w -> w.size >= row.maxOf { it.size } * 0.85f }.map { it.base }.sorted().let { it[it.size / 2] }
+            TLine(segs.map { Seg(it).also { s -> s.base = base } })
         }
     }
 
@@ -533,7 +608,7 @@ object ExactLayout {
         val out = ArrayList<DocItem.Run>()
         for (r in runs) {
             val last = out.lastOrNull()
-            if (last != null && last.font == r.font && last.sizePt == r.sizePt && last.bold == r.bold && last.italic == r.italic && last.color == r.color && last.underline == r.underline)
+            if (last != null && last.copy(text = "") == r.copy(text = ""))
                 out[out.size - 1] = last.copy(text = last.text + r.text)
             else out += r
         }
@@ -563,6 +638,22 @@ object ExactLayout {
             low.startsWith("symbol") -> "Symbol"
             low.startsWith("zapfdingbats") -> "Wingdings"
             low.startsWith("opensymbol") -> "Arial" // pallini degli elenchi di LibreOffice (già convertiti in •)
+            // Caratteri URW / TeX Gyre / Ghostscript (PDF fatti con LaTeX o ristampati con Ghostscript):
+            // stesse misure dei caratteri classici, che in Windows hanno questi nomi
+            "palladio" in low || low.startsWith("palatino") || "pagella" in low || low.startsWith("ppl") -> "Palatino Linotype"
+            "nimbusrom" in low || "nimbusroman" in low || "texgyretermes" in low || low.startsWith("ptm") || low.startsWith("stix") -> "Times New Roman"
+            "nimbussan" in low || "texgyreheros" in low || low.startsWith("phv") -> "Arial"
+            "nimbusmon" in low || "texgyrecursor" in low || low.startsWith("pcr") -> "Courier New"
+            "bookman" in low || "texgyrebonum" in low || low.startsWith("pbk") -> "Bookman Old Style"
+            "urwgothic" in low || "avantgarde" in low || "texgyreadventor" in low || low.startsWith("pag") -> "Century Gothic"
+            "centurysch" in low || "newcentury" in low || "texgyreschola" in low || low.startsWith("pnc") -> "Century Schoolbook"
+            "chancery" in low || "texgyrechorus" in low -> "Monotype Corsiva"
+            low.startsWith("sourcesans") || low.startsWith("sourcesanspro") -> "Calibri"
+            low.startsWith("sourceserif") -> "Cambria"
+            low.startsWith("lmroman") || low.startsWith("cmr") || low.startsWith("cmbx") || low.startsWith("cmti") || low.startsWith("sfrm") -> "Cambria"
+            low.startsWith("cmsy") || low.startsWith("cmmi") || low.startsWith("cmex") || low.startsWith("msbm") || low.startsWith("msam") -> "Cambria Math"
+            low.startsWith("lmsans") || low.startsWith("cmss") -> "Arial"
+            low.startsWith("lmmono") || low.startsWith("cmtt") -> "Courier New"
             else -> n.removeSuffix("MT").removeSuffix("PS").replace(Regex("(?<=[a-z])(?=[A-Z])"), " ").trim()
         }
     }
