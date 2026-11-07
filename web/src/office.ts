@@ -1,6 +1,6 @@
 /**
  * Word / PowerPoint → PDF con il programma Office di questo computer (tramite il piccolo server locale
- * di DocVerso.bat): il risultato è identico a "Salva come PDF" di Word e PowerPoint. Se Office non c'è,
+ * di DocVerso-Pro.bat): il risultato è identico a "Salva come PDF" di Word e PowerPoint. Se Office non c'è,
  * il server usa LibreOffice. Il file va solo dal browser al server su questo stesso computer.
  */
 import { baseName, MIME, type OutFile } from './convert';
@@ -37,7 +37,7 @@ export async function officeToPdf(file: File, progress?: (d: number, t: number, 
     });
   } catch {
     clearInterval(timer);
-    throw new Error('Non riesco a contattare DocVerso sul computer: avvia l’app con DocVerso.bat e riprova.');
+    throw new Error('Non riesco a contattare DocVerso sul computer: avvia l’app con DocVerso-Pro.bat e riprova.');
   }
   finally { clearInterval(timer); }
   if (!r.ok) throw new Error((await r.text()) || 'La conversione in PDF non è riuscita.');

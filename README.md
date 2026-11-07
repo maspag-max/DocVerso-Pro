@@ -1,47 +1,20 @@
-# DocVerso
+# DocVerso Pro
 
-Web app per PC che converte e traduce documenti **interamente nel browser**: i file non escono dal computer, niente pubblicità.
+DocVerso con in più la **traduzione accurata**: [TranslateGemma 4B](https://huggingface.co/onnx-community/translategemma-text-4b-it-ONNX)
+di Google, eseguito nel browser con WebGPU (Transformers.js + ONNX Runtime). Come in DocVerso, i
+documenti non escono mai dal computer.
 
-Deriva dalle app Android [ScanDoc](https://github.com/maspag-max/ScanDoc) e [TradScan](https://github.com/maspag-max/TradScan): il motore di impaginazione (Kotlin puro) è lo stesso, compilato in JavaScript con Kotlin/JS.
+- Conversioni: PDF → Word fedele, Word → Word tradotto, immagini → PDF/Word, PDF → JPEG/PNG,
+  più immagini → un PDF, Word/PowerPoint → PDF (con Office del computer).
+- Traduzione **veloce** (Bergamot, Mozilla) oppure **accurata** (TranslateGemma, ~3 GB, lenta).
+- Glossario dei termini tecnici inglese ↔ italiano, valido con entrambi i motori:
+  con Bergamot tramite parole vicarie dello stesso genere e numero; con TranslateGemma inserendo il
+  termine già tradotto nel testo, con un secondo tentativo tra «» se il modello lo ritraduce.
 
-Indirizzo (dopo l'attivazione di GitHub Pages): https://maspag-max.github.io/DocVerso/
+## Uso in locale
 
-## Uso in locale, senza GitHub
-Scarica `DocVerso-locale.zip` (pagina Actions del repository, ultima esecuzione, sezione Artifacts),
-estrai la cartella e fai doppio clic su `DocVerso.bat`: un piccolo server PowerShell (già presente in
-Windows, senza diritti di amministratore) serve l'app su http://localhost:8765 e la apre nel browser.
-
-## Funzioni (prima versione)
-- PDF → Word fedele (tabelle dalle linee, testo in posizione, immagini e codici a barre ancorati), con o senza traduzione
-- Word → Word tradotto (impaginazione intatta)
-- JPEG/PNG → PDF o Word (OCR con Tesseract.js)
-- Word e PowerPoint → PDF con Office del computer (server locale di DocVerso.bat, automazione COM; ripiego LibreOffice)
-- PDF → JPEG/PNG, più immagini → un PDF
-
-## Come funziona
-- **PDF digitali** (pdf.js): ogni lettera con posizione, carattere e colore, linee, riquadri, disegni e
-  immagini → pagina Word esatta (ExactLayout di TradScan): tabelle con celle unite e sfondi, testo in posizione.
-- **Scansioni e foto** (Tesseract.js): pagina raddrizzata, linee, sfondi, foto, codici a barre e caselle
-  dai pixel, parole dall'OCR → stessa ricostruzione esatta dei PDF digitali.
-- **Traduzione** (Bergamot, modelli di Firefox Translations): tutte le lingue via inglese, rilevamento
-  automatico. I modelli si scaricano una volta (circa 35 MB per lingua) da una copia su Hugging Face e
-  sono verificati con le impronte SHA-256 dell'elenco ufficiale di Mozilla; poi restano nella cache del browser.
-- Nel Word tradotto il carattere si riduce un poco dove il testo non sta nelle righe originali.
-
-Il testo dei documenti non esce mai dal computer; da internet arrivano solo l'app e i modelli di traduzione.
-
-## Struttura
-- `engine/` — motore Kotlin Multiplatform (target JVM per i test, JS per la web app)
-- `web/` — web app (Vite + TypeScript): pdf.js, Tesseract.js, Bergamot
-
-## Sviluppo
-```
-./gradlew :engine:jvmTest                                # test del motore
-./gradlew :engine:jsBrowserProductionLibraryDistribution # motore JS
-cd web && npm ci && npm run dev                          # app in locale
-npx tsx scripts/convert.ts documento.pdf uscita.docx    # stessa conversione dalla riga di comando
-scripts/compare.sh documento.pdf uscita.docx confronto   # confronto visivo originale ↔ Word
-```
-La pubblicazione su GitHub Pages è automatica a ogni push su `main` (`.github/workflows/pages.yml`).
+Scarica `DocVerso-Pro-locale.zip` (pagina Actions, ultima esecuzione, sezione Artifacts), estrai la
+cartella e fai doppio clic su `DocVerso-Pro.bat`. Per la traduzione accurata senza internet lancia
+una volta `ScaricaModelloAccurato.bat` (scarica il modello in `app/modelli/translategemma`).
 
 Realizzata da Massimo Spagnuolo.

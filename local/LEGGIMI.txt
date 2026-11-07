@@ -1,10 +1,12 @@
-DocVerso in locale
-==================
+DocVerso Pro in locale
+======================
+DocVerso Pro è DocVerso con in più la traduzione accurata (TranslateGemma di Google, che gira
+nel browser sulla scheda grafica del computer).
 
 Come si usa
-1. Estrai tutta la cartella DocVerso dove vuoi (per esempio C:\DocVerso).
-2. Fai doppio clic su DocVerso.bat: si apre una finestra nera e DocVerso nel browser.
-3. Lascia aperta la finestra nera mentre usi DocVerso; chiudila quando hai finito.
+1. Estrai tutta la cartella DocVerso-Pro dove vuoi (per esempio C:\DocVerso-Pro).
+2. Fai doppio clic su DocVerso-Pro.bat: si apre una finestra nera e DocVerso Pro nel browser.
+3. Lascia aperta la finestra nera mentre usi DocVerso Pro; chiudila quando hai finito.
 
 Cosa resta sul computer
 - I documenti non escono mai dal computer: lettura, conversione, riconoscimento del testo e
@@ -14,13 +16,40 @@ Cosa resta sul computer
 - Per le altre lingue serve internet la prima volta (circa 35 MB per lingua); dopo il modello
   resta nella cache del browser. Alcune reti aziendali bloccano questo download.
 
+Traduzione veloce o accurata
+- Veloce (Bergamot di Mozilla): pochi secondi per pagina, va bene su qualsiasi computer.
+- Accurata (TranslateGemma 4B di Google): italiano molto più naturale, ma lenta (su un PC
+  d'ufficio anche 10-20 minuti per un articolo di 8 pagine). Serve Chrome o Edge aggiornati e una
+  scheda grafica (va bene anche quella integrata). Rileggi sempre il risultato: ogni tanto il
+  modello cambia il senso di una frase.
+- Il modello della traduzione accurata pesa circa 3 GB. Fai doppio clic su
+  ScaricaModelloAccurato.bat (a casa, se in ufficio il proxy blocca il download): lo mette nella
+  cartella app\modelli e da allora funziona senza internet. Se il download si interrompe,
+  rilancialo: riprende da dove era arrivato. Poi puoi copiare tutta la cartella sul PC dell'ufficio.
+- Senza lo script, la prima traduzione accurata scarica il modello da internet e lo tiene nella
+  cache del browser.
+
 Glossario dei termini tecnici (inglese <-> italiano)
-- Nelle conversioni con traduzione c'è il riquadro "Glossario dei termini tecnici": i termini
+- Nelle conversioni con traduzione c'è il riquadro "Traduzione veloce o accurata
+- Veloce (Bergamot di Mozilla): pochi secondi per pagina, va bene su qualsiasi computer.
+- Accurata (TranslateGemma 4B di Google): italiano molto più naturale, ma lenta (su un PC
+  d'ufficio anche 10-20 minuti per un articolo di 8 pagine). Serve Chrome o Edge aggiornati e una
+  scheda grafica (va bene anche quella integrata). Rileggi sempre il risultato: ogni tanto il
+  modello cambia il senso di una frase.
+- Il modello della traduzione accurata pesa circa 3 GB. Fai doppio clic su
+  ScaricaModelloAccurato.bat (a casa, se in ufficio il proxy blocca il download): lo mette nella
+  cartella app\modelli e da allora funziona senza internet. Se il download si interrompe,
+  rilancialo: riprende da dove era arrivato. Poi puoi copiare tutta la cartella sul PC dell'ufficio.
+- Senza lo script, la prima traduzione accurata scarica il modello da internet e lo tiene nella
+  cache del browser.
+
+Glossario dei termini tecnici": i termini
   dell'elenco sono tradotti sempre allo stesso modo (es. confined space -> ambiente confinato,
   PPE -> DPI, risk assessment -> valutazione dei rischi), con articoli e concordanze corretti.
 - L'elenco si può modificare: una riga per termine, "inglese = italiano"; se il genere non è
   chiaro aggiungi (m), (f), (m pl) o (f pl). Viene salvato nel browser di questo computer.
-- Vale nei due sensi (inglese -> italiano e italiano -> inglese). Si può disattivare con la casella.
+- Vale nei due sensi (inglese -> italiano e italiano -> inglese), con tutte e due le traduzioni.
+  Si può disattivare con la casella.
 
 Word e PowerPoint -> PDF
 - La conversione usa Microsoft Word / PowerPoint installati su questo computer (stesso risultato

@@ -2,7 +2,7 @@
 rem Scarica il modello della traduzione accurata (TranslateGemma 4B, circa 3 GB) nella cartella
 rem app\modelli\translategemma, cosi' funziona anche senza internet e dietro il proxy dell'ufficio.
 rem Se il download si interrompe, rilancialo: riprende da dove era arrivato.
-rem Puoi scaricarlo a casa e poi copiare tutta la cartella DocVerso sul PC dell'ufficio.
+rem Puoi scaricarlo a casa e poi copiare tutta la cartella DocVerso-Pro sul PC dell'ufficio.
 setlocal
 cd /d "%~dp0"
 set "BASE=https://huggingface.co/onnx-community/translategemma-text-4b-it-ONNX/resolve/main"

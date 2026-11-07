@@ -123,7 +123,7 @@ const available = (c: Choice) => (c.needs !== 'ocr' || ocrAvailable) && (c.needs
 /** Perché una scelta non è disponibile. */
 function why(c: Choice): string {
   if (c.needs === 'word' || c.needs === 'powerpoint') {
-    if (!office) return 'Disponibile quando DocVerso è avviato con DocVerso.bat.';
+    if (!office) return 'Disponibile quando DocVerso è avviato con DocVerso-Pro.bat.';
     return `Serve Microsoft ${c.needs === 'word' ? 'Word' : 'PowerPoint'} (o LibreOffice) installato su questo computer.`;
   }
   return 'In preparazione: arriverà con il prossimo aggiornamento.';

@@ -42,14 +42,14 @@ jobs:
           npm ci
           npm run build
 
-      - name: Pacchetto per l'uso in locale (DocVerso.bat)
+      - name: Pacchetto per l'uso in locale (DocVerso-Pro.bat)
         working-directory: web
         run: npm run pacchetto
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DocVerso-locale
-          path: web/DocVerso-locale.zip
+          name: DocVerso-Pro-locale
+          path: web/DocVerso-Pro-locale.zip
 
       - uses: actions/upload-pages-artifact@v3
         with:

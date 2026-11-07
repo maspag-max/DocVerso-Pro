@@ -184,10 +184,10 @@ $pool.Open()
 $jobs = New-Object System.Collections.ArrayList
 
 Write-Host ''
-Write-Host '  DocVerso e'' aperto nel browser:' -ForegroundColor Cyan
+Write-Host '  DocVerso Pro e'' aperto nel browser:' -ForegroundColor Cyan
 Write-Host "  $url"
 Write-Host ''
-Write-Host '  I file restano su questo computer. Lascia aperta questa finestra mentre usi DocVerso;'
+Write-Host '  I file restano su questo computer. Lascia aperta questa finestra mentre usi DocVerso Pro;'
 Write-Host '  chiudila quando hai finito.'
 Write-Host ''
 Start-Process $url
