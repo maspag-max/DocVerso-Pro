@@ -11,6 +11,6 @@ local.properties
 web/public/pdfjs/
 web/public/tesseract/
 web/public/bergamot/
-web/DocVerso-Pro-locale.zip
+web/DocVerso*.zip
 web/models-cache/
 web/public/ort/

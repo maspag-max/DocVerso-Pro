@@ -36,7 +36,9 @@ export function loadGemma(status: (m: string) => void): Promise<TextGenerationPi
     // Prima la copia nel pacchetto (funziona anche senza internet e dietro il proxy dell'ufficio)
     const local = new URL(import.meta.env.BASE_URL + LOCAL_DIR, location.href).href;
     const hasLocal = await fetch(local + GEMMA_ID + '/config.json').then(r => r.ok, () => false);
-    env.localModelPath = local;
+    // Percorso relativo, non un indirizzo completo: con un indirizzo http Transformers.js (4.3) non controlla
+    // i file locali del tokenizer e si ferma con "Cannot read properties of null (reading 'add_bos_token')"
+    env.localModelPath = import.meta.env.BASE_URL + LOCAL_DIR;
     env.allowLocalModels = hasLocal;
     env.allowRemoteModels = !hasLocal;
     // Con la copia locale non serve duplicarla (3 GB) nella cache del browser
@@ -76,3 +78,14 @@ export async function gemmaTranslate(p: TextGenerationPipeline, text: string, fr
   const out: any = await (p as any)(messages, { max_new_tokens: max, do_sample: false });
   return String(out[0].generated_text.at(-1).content).trim();
 }
+
+/** Solo per le prove: carica il tokenizer come fa la traduzione accurata e conta i token di una frase. */
+(globalThis as any).docversoTokenizerTest = async () => {
+  const { AutoTokenizer, env } = await import('@huggingface/transformers');
+  env.localModelPath = import.meta.env.BASE_URL + LOCAL_DIR;
+  env.allowLocalModels = true; env.allowRemoteModels = false; env.useBrowserCache = false;
+  const tok: any = await AutoTokenizer.from_pretrained(GEMMA_ID);
+  const msgs = [{ role: 'user', content: [{ type: 'text', source_lang_code: 'en', target_lang_code: 'it_IT', text: 'Workers entering the confined space.' }] }];
+  const text = tok.apply_chat_template(msgs, { tokenize: false, add_generation_prompt: true });
+  return { bos: tok.add_bos_token, text };
+};
