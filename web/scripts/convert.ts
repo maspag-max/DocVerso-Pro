@@ -15,7 +15,7 @@ import { nodePlatform } from './node-platform';
 const [, , input, output, ...flags] = process.argv;
 const root = new URL('../node_modules/pdfjs-dist/', import.meta.url).pathname;
 const fake: TranslateBatch | undefined = flags.includes('--fake-translate')
-  ? async texts => texts.map(t => t + ' ' + t.slice(0, Math.floor(t.length / 4)).trim())
+  ? async texts => { if (process.env.DUMP_TR) (await import('fs')).writeFileSync(process.env.DUMP_TR, JSON.stringify(texts)); return texts.map(t => t + ' ' + t.slice(0, Math.floor(t.length / 4)).trim()); }
   : undefined;
 
 let ocr: Ocr | undefined;

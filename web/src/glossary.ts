@@ -16,95 +16,26 @@ export interface Term {
   plural: boolean;
 }
 
-/** Glossario di partenza: sicurezza sul lavoro, ambienti confinati, normativa, ricerca. */
-export const DEFAULT_GLOSSARY = `# Una riga per termine:  termine inglese = termine italiano
-# Genere e numero del termine italiano si capiscono dalla parola (es. -o maschile, -a femminile);
-# se non è chiaro aggiungi alla fine (m), (f), (m pl) o (f pl). Le righe che iniziano con # sono note.
+import { BUILTIN_GLOSSARY } from './glossary-data';
+export { BUILTIN_GLOSSARY };
 
-# Ambienti confinati
-confined space = ambiente confinato (m)
-confined spaces = ambienti confinati (m pl)
-confined environment = ambiente confinato (m)
-confined environments = ambienti confinati (m pl)
-confined and/or suspected of pollution spaces = ambienti confinati e/o sospetti di inquinamento (m pl)
-confined and/or suspected of pollution environments = ambienti confinati e/o sospetti di inquinamento (m pl)
-confined and/or suspected of pollution environment = ambiente confinato e/o sospetto di inquinamento (m)
-confined and/or suspected polluted environments = ambienti confinati e/o sospetti di inquinamento (m pl)
-confined and/or suspected polluted environment = ambiente confinato e/o sospetto di inquinamento (m)
-confined and/or pollution suspected spaces = ambienti confinati e/o sospetti di inquinamento (m pl)
-confined and/or pollution suspected space = ambiente confinato e/o sospetto di inquinamento (m)
-confined and/or suspected of pollution = confinati e/o sospetti di inquinamento (m pl)
-suspected or confined environments = ambienti sospetti di inquinamento o confinati (m pl)
-suspected polluted environments = ambienti sospetti di inquinamento (m pl)
-suspected polluted environment = ambiente sospetto di inquinamento (m)
-environments suspected of pollution = ambienti sospetti di inquinamento (m pl)
-oxygen deficiency = carenza di ossigeno
-entry permit = permesso di ingresso (m)
-permit to work = permesso di lavoro (m)
-work permit = permesso di lavoro (m)
-gas detector = rilevatore di gas (m)
-multi-gas detector = rilevatore multigas (m)
-multigas detector = rilevatore multigas (m)
-rescue plan = piano di soccorso (m)
-rescue personnel = personale di soccorso (m)
-manhole = passo d'uomo (m)
-manholes = passi d'uomo (m pl)
-
-# Sicurezza sul lavoro
-occupational safety and health = salute e sicurezza sul lavoro (f)
-occupational health and safety = salute e sicurezza sul lavoro (f)
-health and safety at work = salute e sicurezza sul lavoro (f)
-safety and health at work = salute e sicurezza sul lavoro (f)
-risk assessment = valutazione dei rischi (f)
-risk assessments = valutazioni dei rischi (f pl)
-hazard identification = identificazione dei pericoli (f)
-risk factor = fattore di rischio (m)
-risk factors = fattori di rischio (m pl)
-personal protective equipment = dispositivi di protezione individuale (m pl)
-PPE = DPI (m pl)
-safety data sheet = scheda di dati di sicurezza (f)
-safety data sheets = schede di dati di sicurezza (f pl)
-near miss = mancato infortunio (m)
-near misses = mancati infortuni (m pl)
-occupational accident = infortunio sul lavoro (m)
-occupational accidents = infortuni sul lavoro (m pl)
-accident at work = infortunio sul lavoro (m)
-accidents at work = infortuni sul lavoro (m pl)
-work-related accident = infortunio sul lavoro (m)
-work-related accidents = infortuni sul lavoro (m pl)
-occupational disease = malattia professionale (f)
-occupational diseases = malattie professionali (f pl)
-operating procedure = procedura operativa (f)
-operating procedures = procedure operative (f pl)
-emergency procedure = procedura di emergenza (f)
-emergency procedures = procedure di emergenza (f pl)
-lockout/tagout = lockout/tagout (m)
-self-employed workers = lavoratori autonomi (m pl)
-self-employed worker = lavoratore autonomo (m)
-employer = datore di lavoro (m)
-employers = datori di lavoro (m pl)
-training course = corso di formazione (m)
-training courses = corsi di formazione (m pl)
-
-# Normativa
-Legislative Decree = Decreto Legislativo (m)
-Presidential Decree = Decreto del Presidente della Repubblica (m)
-technical standard = norma tecnica (f)
-technical standards = norme tecniche (f pl)
-
-# Impianti e ricerca
-predictive maintenance = manutenzione predittiva (f)
-waste-to-energy plant = impianto di termovalorizzazione (m)
-waste-to-energy plants = impianti di termovalorizzazione (m pl)
-virtual reality = realtà virtuale (f)
-augmented reality = realtà aumentata (f)
+/** Elenco iniziale dei termini dell'utente (si aggiungono a quelli inclusi e hanno la precedenza). */
+export const DEFAULT_GLOSSARY = `# I tuoi termini: si aggiungono ai termini già inclusi e, se lo stesso termine inglese c'è in
+# entrambi, vale il tuo. Una riga per termine:  termine inglese = termine italiano
+# Se il genere non è chiaro aggiungi alla fine (m), (f), (m pl) o (f pl). Le righe con # sono note.
+# Esempio:
+# work-related stress = stress lavoro-correlato (m)
 `;
-
 const KEY = 'docverso-glossario';
 const ON_KEY = 'docverso-glossario-attivo';
 
 export function loadGlossaryText(): string {
-  try { return localStorage.getItem(KEY) ?? DEFAULT_GLOSSARY; } catch { return DEFAULT_GLOSSARY; }
+  try {
+    const t = localStorage.getItem(KEY);
+    // Il vecchio elenco iniziale (prima versione) ora fa parte dei termini inclusi
+    if (t === null || t.startsWith('# Una riga per termine:  termine inglese = termine italiano')) return DEFAULT_GLOSSARY;
+    return t;
+  } catch { return DEFAULT_GLOSSARY; }
 }
 export function saveGlossaryText(text: string) {
   try { if (text.trim() === DEFAULT_GLOSSARY.trim()) localStorage.removeItem(KEY); else localStorage.setItem(KEY, text); } catch { /* memoria del browser non disponibile */ }
@@ -130,7 +61,7 @@ export function parseGlossary(text: string): Term[] {
     let plural: boolean | null = null;
     const tag = it.match(/\(\s*([mf])\s*(pl)?\s*\)\s*$/i);
     if (tag) { gender = tag[1].toLowerCase() as 'm' | 'f'; plural = !!tag[2]; it = it.slice(0, tag.index).trim(); }
-    if (!en || !it) continue;
+    if (!en || !it) continue; // (uguale nelle due lingue = resta così, non si traduce)
     // Genere e numero dalla prima parola italiana, se non indicati
     const head = it.split(/\s+/)[0].toLowerCase();
     if (gender === null) gender = /a$|e$/.test(head) && !/ente$|ore$|ere$/.test(head) ? 'f' : 'm';
@@ -139,6 +70,16 @@ export function parseGlossary(text: string): Term[] {
   }
   return out;
 }
+
+let builtin: Term[] | null = null;
+/** Termini inclusi più quelli dell'utente (i suoi hanno la precedenza sullo stesso termine inglese). */
+export function allTerms(): Term[] {
+  builtin ??= parseGlossary(BUILTIN_GLOSSARY);
+  const mine = parseGlossary(loadGlossaryText());
+  const own = new Set(mine.map(t => t.en.toLowerCase()));
+  return [...mine, ...builtin.filter(t => !own.has(t.en.toLowerCase()))];
+}
+export const builtinCount = () => (builtin ??= parseGlossary(BUILTIN_GLOSSARY)).length;
 
 // ------------------------------------------------------------------ segnaposti
 
@@ -186,13 +127,33 @@ export interface Protected {
   terms: { term: Term; caps: 'lower' | 'upper'; proxy?: Proxy }[];
 }
 
+// Spazi e trattini flessibili; parola intera (niente lettere o cifre attaccate)
+const flexOf = (t: string) => esc(t).replace(/\s*\/\s*|\\-|\s+/g, m => (m.includes('/') ? '\\s*\\/\\s*' : m === '\\-' ? '[-\\s]?' : '[\\s-]+'));
+const norm = (s: string) => s.toLowerCase().replace(/\s*\/\s*/g, '/').replace(/[\s-]+/g, ' ');
+interface Compiled { sorted: Term[]; re: RegExp; flex: (t: string) => string; byKey: Map<string, Term> }
+const cache = new WeakMap<Term[], Partial<Record<'en' | 'it', Compiled | null>>>();
+/** Espressione regolare di tutti i termini (si prepara una volta per elenco e lingua: sono più di mille). */
+function compiled(terms: Term[], from: 'en' | 'it'): Compiled | null {
+  const entry = cache.get(terms) ?? {};
+  if (entry[from] !== undefined) return entry[from]!;
+  const sorted = [...terms].sort((a, b) => b[from].length - a[from].length);
+  let c: Compiled | null = null;
+  if (sorted.length) {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])(${sorted.map(t => flexOf(t[from])).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+    const byKey = new Map<string, Term>();
+    for (const t of sorted) if (!byKey.has(norm(t[from]))) byKey.set(norm(t[from]), t);
+    c = { sorted, re, flex: flexOf, byKey };
+  }
+  entry[from] = c; cache.set(terms, entry);
+  return c;
+}
+
 /** Sostituisce i termini del glossario (lingua [from]) con segnaposti. */
 export function protect(text: string, terms: Term[], from: 'en' | 'it', mode: 'proxy' | 'token' = 'proxy'): Protected {
-  const sorted = [...terms].sort((a, b) => b[from].length - a[from].length);
-  if (sorted.length === 0) return { text, mode, terms: [] };
-  // Spazi e trattini flessibili; parola intera (niente lettere o cifre attaccate)
-  const flex = (t: string) => esc(t).replace(/\s*\/\s*|\\-|\s+/g, m => (m.includes('/') ? '\\s*\\/\\s*' : m === '\\-' ? '[-\\s]?' : '[\\s-]+'));
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])(${sorted.map(t => flex(t[from])).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+  const c = compiled(terms, from);
+  if (!c) return { text, mode, terms: [] };
+  const { sorted, re, flex, byKey } = c;
+  re.lastIndex = 0;
   // Parole vicarie libere: quelle che non compaiono già nel testo
   const free = { m: PROXIES.m.filter(p => ![p.en, p.enPl, p.it, p.itPl].some(w => word(w).test(text))), f: PROXIES.f.filter(p => ![p.en, p.enPl, p.it, p.itPl].some(w => word(w).test(text))) };
   const used: Protected['terms'] = [];
@@ -200,7 +161,7 @@ export function protect(text: string, terms: Term[], from: 'en' | 'it', mode: 'p
   let last = 0;
   for (const mt of text.matchAll(re)) {
     const m = mt[0];
-    const term = sorted.find(t => new RegExp(`^${flex(t[from])}$`, 'iu').test(m));
+    const term = byKey.get(norm(m)) ?? sorted.find(t => new RegExp(`^${flex(t[from])}$`, 'iu').test(m));
     if (!term) continue;
     // Sigle (PPE, OSH): solo se scritte uguali
     if (term[from] === term[from].toUpperCase() && m !== term[from]) continue;

@@ -653,7 +653,10 @@ object ExactLayout {
             val gaps = row.zipWithNext { a, b -> b.l - a.r }.filter { it > 0f }.sorted()
             val sizeRow = row.maxOf { it.size }
             // (solo se lo spazio tipico è uno spazio fra parole, non le colonne di una tabella senza linee)
-            val typical = if (gaps.size >= 3 && gaps[gaps.size / 2] < 0.8f * sizeRow) 2.2f * gaps[gaps.size / 2] else 0f
+            // Testo giustificato: spazi tutti simili (anche molto larghi, nelle righe con poche parole);
+            // le colonne di una tabella senza linee hanno invece spazi diversi fra loro
+            val uniform = gaps.size >= 2 && gaps.last() < gaps.first() * 1.8f && gaps[gaps.size / 2] < 2.5f * sizeRow
+            val typical = if (gaps.size >= 2 && (uniform || (gaps.size >= 3 && gaps[gaps.size / 2] < 0.8f * sizeRow))) 2.2f * gaps[gaps.size / 2] else 0f
             val segs = ArrayList<ArrayList<Word>>()
             for (w in row) {
                 val s = segs.lastOrNull()

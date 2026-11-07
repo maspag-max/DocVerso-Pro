@@ -11,7 +11,7 @@ import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
 import { GemmaMissing, gemmaSupports, gemmaTranslate, gpuName, isGpuError, loadGemma, resetGemma } from './gemma';
-import { glossaryEnabled, inject, loadGlossaryText, missingTerms, parseGlossary, protect, restore, unquote } from './glossary';
+import { allTerms, glossaryEnabled, inject, missingTerms, protect, restore, unquote } from './glossary';
 
 export const AUTO = 'auto';
 export const translationAvailable = true;
@@ -219,7 +219,7 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     let done = 0;
     // Glossario (solo inglese ↔ italiano): termini fissi protetti da segnaposti
     const pair = (src === 'en' && to === 'it') || (src === 'it' && to === 'en');
-    const terms = pair && glossaryEnabled() ? parseGlossary(loadGlossaryText()) : [];
+    const terms = pair && glossaryEnabled() ? allTerms() : [];
     /** Una frase col glossario: parole vicarie, poi sigle ZQX, poi senza glossario. */
     const withGlossary = async (text: string, split: boolean): Promise<string> => {
       if (accurate) {

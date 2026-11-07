@@ -2,7 +2,7 @@ import './style.css';
 import { baseName, imagesToDocx, imagesToPdf, pdfToDocx, pdfToImages, type OutFile, type PageSize } from './convert';
 import { getOcr, ocrAvailable } from './ocr';
 import { AUTO, LANGUAGES, makeTranslate, translationAvailable, type Engine } from './translate';
-import { DEFAULT_GLOSSARY, glossaryEnabled, loadGlossaryText, parseGlossary, saveGlossaryText, setGlossaryEnabled } from './glossary';
+import { BUILTIN_GLOSSARY, DEFAULT_GLOSSARY, builtinCount, glossaryEnabled, loadGlossaryText, parseGlossary, saveGlossaryText, setGlossaryEnabled } from './glossary';
 import { docxTranslate } from './docx';
 import { officeStatus, officeToPdf, type OfficeStatus } from './office';
 
@@ -159,18 +159,22 @@ function renderExtra(c: Choice | undefined) {
   }
 }
 
-/** Glossario dei termini tecnici: attivo per inglese ↔ italiano, modificabile, salvato nel browser. */
+/** Glossario dei termini tecnici: termini inclusi più quelli dell'utente (salvati nel browser), per inglese ↔ italiano. */
 function glossaryBox() {
   const d = document.createElement('details'); d.className = 'glossary';
   d.innerHTML = `<summary><label class="check"><input type="checkbox"> Glossario dei termini tecnici</label> <span class="count"></span></summary>
-    <p>Per inglese ↔ italiano: questi termini sono tradotti sempre così, con l'articolo giusto. Una riga per termine, <code>inglese = italiano</code>; se il genere non è chiaro aggiungi (m), (f), (m pl) o (f pl).</p>
-    <textarea spellcheck="false" rows="12"></textarea>
-    <div class="row"><button type="button" class="small" data-a="save">Salva</button><button type="button" class="small ghost" data-a="reset">Ripristina l'elenco iniziale</button><span class="saved"></span></div>`;
+    <p>Per inglese ↔ italiano: questi termini sono tradotti sempre così, con l'articolo giusto. Sono già inclusi <b class="nb"></b> termini di ingegneria (meccanica, elettrica, civile, impianti, materiali, automazione), sicurezza sul lavoro, ambienti confinati, macchine, norme, manutenzione, dati e ricerca.</p>
+    <p>Qui sotto puoi aggiungere i tuoi termini, uno per riga: <code>inglese = italiano</code>. Se lo stesso termine c'è già fra quelli inclusi, vale il tuo.</p>
+    <textarea spellcheck="false" rows="8"></textarea>
+    <div class="row"><button type="button" class="small" data-a="save">Salva</button><button type="button" class="small ghost" data-a="reset">Svuota i miei termini</button><button type="button" class="small ghost" data-a="show">Mostra i termini inclusi</button><span class="saved"></span></div>
+    <textarea class="builtin" spellcheck="false" rows="14" readonly hidden></textarea>`;
   const cb = d.querySelector<HTMLInputElement>('input[type=checkbox]')!;
-  const ta = d.querySelector('textarea')!;
+  const ta = d.querySelector<HTMLTextAreaElement>('textarea:not(.builtin)')!;
+  const bi = d.querySelector<HTMLTextAreaElement>('textarea.builtin')!;
   const count = d.querySelector<HTMLElement>('.count')!;
   const saved = d.querySelector<HTMLElement>('.saved')!;
-  const showCount = () => { count.textContent = `(${parseGlossary(ta.value).length} termini)`; };
+  d.querySelector<HTMLElement>('.nb')!.textContent = builtinCount().toLocaleString('it-IT');
+  const showCount = () => { const mine = parseGlossary(ta.value).length; count.textContent = `(${builtinCount().toLocaleString('it-IT')} inclusi${mine ? ` + ${mine} tuoi` : ''})`; };
   cb.checked = glossaryEnabled();
   ta.value = loadGlossaryText();
   showCount();
@@ -180,7 +184,12 @@ function glossaryBox() {
   cb.addEventListener('change', () => setGlossaryEnabled(cb.checked));
   ta.addEventListener('input', () => { showCount(); saved.textContent = ''; });
   d.querySelector('[data-a=save]')!.addEventListener('click', () => { saveGlossaryText(ta.value); saved.textContent = 'Salvato.'; });
-  d.querySelector('[data-a=reset]')!.addEventListener('click', () => { ta.value = DEFAULT_GLOSSARY; saveGlossaryText(ta.value); showCount(); saved.textContent = 'Elenco iniziale ripristinato.'; });
+  d.querySelector('[data-a=reset]')!.addEventListener('click', () => { ta.value = DEFAULT_GLOSSARY; saveGlossaryText(ta.value); showCount(); saved.textContent = 'I tuoi termini sono stati tolti.'; });
+  d.querySelector('[data-a=show]')!.addEventListener('click', e => {
+    bi.hidden = !bi.hidden;
+    if (!bi.value) bi.value = BUILTIN_GLOSSARY.trim();
+    (e.target as HTMLElement).textContent = bi.hidden ? 'Mostra i termini inclusi' : 'Nascondi i termini inclusi';
+  });
   ta.addEventListener('blur', () => saveGlossaryText(ta.value));
   return d;
 }

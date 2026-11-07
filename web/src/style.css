@@ -44,7 +44,6 @@ button, input, select { font: inherit; color: inherit; }
 .mark-fold { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 .mark-arrow { fill: none; stroke: var(--stamp); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .brand-name { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; font-variation-settings: 'CASL' 0.6, 'MONO' 0; }
-.brand-name .pro { font-style: normal; font-weight: 700; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--stamp-ink); background: var(--stamp); border-radius: 6px; padding: 2px 7px; margin-left: 4px; vertical-align: 4px; }
 .theme { display: flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--sheet); }
 .theme button { border: 0; background: none; padding: 4px 12px; border-radius: 999px; font-size: 14px; cursor: pointer; color: var(--ink-soft); }
 .theme button[aria-checked="true"] { background: var(--ink); color: var(--sheet); }
@@ -127,6 +126,7 @@ h2 { font-size: 22px; line-height: 1.25; font-weight: 700; margin: 0 0 18px; let
 .glossary button.small { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--stamp); background: var(--stamp); color: var(--stamp-ink); font: inherit; cursor: pointer; }
 .glossary button.ghost { background: transparent; color: var(--stamp); }
 .glossary .saved { color: var(--ok); }
+.glossary textarea.builtin { margin-top: 8px; color: var(--ink-soft); }
 .field select { min-width: 180px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet); color: var(--ink); font-size: 15px; }
 .swap { align-self: end; border: 1px solid var(--line); background: var(--sheet); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
 
