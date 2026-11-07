@@ -10,7 +10,7 @@
 import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator/translator.js';
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
-import { gemmaSupports, gemmaTranslate, loadGemma } from './gemma';
+import { GemmaMissing, gemmaSupports, gemmaTranslate, loadGemma } from './gemma';
 import { glossaryEnabled, inject, loadGlossaryText, missingTerms, parseGlossary, protect, restore, unquote } from './glossary';
 
 export const AUTO = 'auto';
@@ -242,6 +242,8 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
       // Errore (di solito la rete): il prossimo tentativo riparte da zero
       translator?.delete(); translator = null; loadedPairs = '';
       const msg = e instanceof Error ? e.message : String(e);
+      // Traduzione accurata: il messaggio vero (il modello sta sul computer, non si scarica)
+      if (accurate) throw new Error(e instanceof GemmaMissing ? msg : `La traduzione accurata non è riuscita: ${msg}`, { cause: e });
       throw new Error(/Could not fetch|Failed to fetch|NetworkError|download/i.test(msg) ? OFFLINE : msg, { cause: e });
     } finally {
       onBytes = null;

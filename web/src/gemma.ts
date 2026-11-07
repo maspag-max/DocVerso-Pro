@@ -21,6 +21,9 @@ const CODES: Record<string, string> = {
 };
 export const gemmaSupports = (lang: string) => lang in CODES;
 
+/** Modello mancante o incompleto nella cartella del programma (messaggio già pronto per chi usa l'app). */
+export class GemmaMissing extends Error {}
+
 export async function webgpuAvailable(): Promise<boolean> {
   try { return !!(await (navigator as any).gpu?.requestAdapter()); } catch { return false; }
 }
@@ -35,7 +38,16 @@ export function loadGemma(status: (m: string) => void): Promise<TextGenerationPi
     const { pipeline, env } = await import('@huggingface/transformers');
     // Prima la copia nel pacchetto (funziona anche senza internet e dietro il proxy dell'ufficio)
     const local = new URL(import.meta.env.BASE_URL + LOCAL_DIR, location.href).href;
-    const hasLocal = await fetch(local + GEMMA_ID + '/config.json').then(r => r.ok, () => false);
+    // Il modello deve essere nella cartella del programma: scaricarlo dal browser (3 GB nella cache) è lento e
+    // si interrompe facilmente, quindi lo si scarica una volta con ScaricaModelloAccurato.bat
+    const has = (f: string) => fetch(local + GEMMA_ID + '/' + f, { method: 'HEAD' }).then(r => r.ok, () => false); // solo l'intestazione, non i 2 GB
+    const files = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/model_q4.onnx', 'onnx/model_q4.onnx_data', 'onnx/model_q4.onnx_data_1'];
+    const missing = [];
+    for (const f of files) if (!(await has(f))) missing.push(f);
+    if (missing.length) throw new GemmaMissing(missing.length === files.length
+      ? 'Il modello della traduzione accurata non è nella cartella di DocVerso Pro. Chiudi DocVerso Pro, fai doppio clic su ScaricaModelloAccurato.bat (nella stessa cartella di DocVerso-Pro.bat), aspetta che finisca e riprova.'
+      : `Il modello della traduzione accurata è incompleto (mancano: ${missing.join(', ')}). Rilancia ScaricaModelloAccurato.bat nella cartella di DocVerso Pro: riprende da dove era arrivato.`);
+    const hasLocal = true;
     // Percorso relativo, non un indirizzo completo: con un indirizzo http Transformers.js (4.3) non controlla
     // i file locali del tokenizer e si ferma con "Cannot read properties of null (reading 'add_bos_token')"
     env.localModelPath = import.meta.env.BASE_URL + LOCAL_DIR;

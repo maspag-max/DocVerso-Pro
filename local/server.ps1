@@ -167,6 +167,8 @@ $serve = {
             $ext = [System.IO.Path]::GetExtension($file).ToLowerInvariant()
             $res.ContentType = $(if ($types.ContainsKey($ext)) { $types[$ext] } else { 'application/octet-stream' })
             $res.Headers.Add('Cache-Control', 'no-cache')
+            # HEAD: solo le intestazioni (DocVerso controlla se un file c'è senza scaricarlo, es. il modello da 2 GB)
+            if ($ctx.Request.HttpMethod -eq 'HEAD') { $res.ContentLength64 = (New-Object System.IO.FileInfo $file).Length; return }
             $fs = [System.IO.File]::Open($file, 'Open', 'Read', 'Read')
             $res.ContentLength64 = $fs.Length
             $fs.CopyTo($res.OutputStream, 1048576)
