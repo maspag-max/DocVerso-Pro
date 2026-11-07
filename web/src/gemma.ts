@@ -29,12 +29,29 @@ export async function webgpuAvailable(): Promise<boolean> {
 }
 
 let gen: Promise<TextGenerationPipeline> | null = null;
+/** Scheda grafica usata (per i messaggi d'errore). */
+export let gpuName = '';
+
+/** Dimentica il modello caricato (dopo un errore della scheda grafica si ricarica da capo). */
+export async function resetGemma() {
+  const g = gen; gen = null;
+  try { await (await g)?.dispose?.(); } catch { /* già perso */ }
+}
+
+/** Errore della scheda grafica (memoria esaurita, tempo massimo superato, dispositivo perso). */
+export const isGpuError = (e: unknown) => /OrtRun|webgpu|GPUBuffer|BufferManager|device (was )?lost|mapAsync|out of memory|Aborted/i.test(e instanceof Error ? e.message : String(e));
 
 /** Carica il modello (una volta). [status] riceve i messaggi di attesa con la percentuale. */
 export function loadGemma(status: (m: string) => void): Promise<TextGenerationPipeline> {
   if (gen) return gen;
   gen = (async () => {
     if (!(await webgpuAvailable())) throw new Error('La traduzione accurata richiede WebGPU: usa Chrome o Edge aggiornati. Su questo computer usa la traduzione veloce.');
+    try {
+      const ad: any = await (navigator as any).gpu.requestAdapter({ powerPreference: 'high-performance' });
+      const i = ad?.info ?? {};
+      gpuName = [i.vendor, i.architecture, i.description].filter(Boolean).join(' ') || 'scheda grafica';
+      gpuName += ` (buffer max ${Math.round((ad?.limits?.maxBufferSize ?? 0) / 1048576)} MB)`;
+    } catch { gpuName = 'scheda grafica'; }
     const { pipeline, env } = await import('@huggingface/transformers');
     // Prima la copia nel pacchetto (funziona anche senza internet e dietro il proxy dell'ufficio)
     const local = new URL(import.meta.env.BASE_URL + LOCAL_DIR, location.href).href;
@@ -82,11 +99,27 @@ export function loadGemma(status: (m: string) => void): Promise<TextGenerationPi
 }
 
 /** Traduce un testo (un paragrafo). */
-export async function gemmaTranslate(p: TextGenerationPipeline, text: string, from: string, to: string): Promise<string> {
+/**
+ * Traduce un testo. I paragrafi lunghi si traducono a pezzi di qualche frase: meno lavoro per volta sulla
+ * scheda grafica (le schede integrate dei portatili altrimenti esauriscono la memoria o il tempo massimo).
+ */
+export async function gemmaTranslate(p: TextGenerationPipeline, text: string, from: string, to: string, maxChars = 400): Promise<string> {
   if (!text.trim()) return text;
+  const parts: string[] = [];
+  let cur = '';
+  for (const s of text.split(/(?<=[.!?;:])\s+/)) {
+    if (cur && cur.length + s.length + 1 > maxChars) { parts.push(cur); cur = s; } else cur = cur ? cur + ' ' + s : s;
+  }
+  if (cur) parts.push(cur);
+  const out: string[] = [];
+  for (const part of parts) out.push(await gemmaOne(p, part, from, to));
+  return out.join(' ');
+}
+
+async function gemmaOne(p: TextGenerationPipeline, text: string, from: string, to: string): Promise<string> {
   const messages = [{ role: 'user', content: [{ type: 'text', source_lang_code: CODES[from], target_lang_code: CODES[to], text }] }];
   // Lunghezza massima: circa il doppio dei token del testo d'ingresso
-  const max = Math.min(2048, Math.max(64, Math.ceil(text.length / 2)));
+  const max = Math.min(1024, Math.max(48, Math.ceil(text.length / 2)));
   const out: any = await (p as any)(messages, { max_new_tokens: max, do_sample: false });
   return String(out[0].generated_text.at(-1).content).trim();
 }

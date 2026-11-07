@@ -10,7 +10,7 @@
 import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator/translator.js';
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
-import { GemmaMissing, gemmaSupports, gemmaTranslate, loadGemma } from './gemma';
+import { GemmaMissing, gemmaSupports, gemmaTranslate, gpuName, isGpuError, loadGemma, resetGemma } from './gemma';
 import { glossaryEnabled, inject, loadGlossaryText, missingTerms, parseGlossary, protect, restore, unquote } from './glossary';
 
 export const AUTO = 'auto';
@@ -189,10 +189,28 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     let one: (text: string) => Promise<string>;
     if (accurate) {
       status('Preparazione della traduzione accurata…');
-      const g = await loadGemma(status);
-      // La scheda grafica traduce un paragrafo alla volta: coda
+      let g = await loadGemma(status);
+      // La scheda grafica traduce un paragrafo alla volta: coda. Se la scheda va in errore (memoria, tempo
+      // massimo) si ricarica il modello e si riprova lo stesso testo a pezzi più piccoli, una volta.
       let queue: Promise<unknown> = Promise.resolve();
-      one = text => { const r = queue.then(() => gemmaTranslate(g, text, src, to)); queue = r.catch(() => {}); return r; };
+      let dead: Error | null = null;
+      const run = async (text: string) => {
+        if (dead) throw dead;
+        try { return await gemmaTranslate(g, text, src, to); } catch (e) {
+          if (!isGpuError(e)) throw e;
+          status('La scheda grafica si è bloccata: ricarico il modello e riprovo con pezzi più piccoli…');
+          await resetGemma();
+          g = await loadGemma(status);
+          try { return await gemmaTranslate(g, text, src, to, 150); } catch (e2) {
+            if (!isGpuError(e2)) throw e2;
+            await resetGemma();
+            throw (dead = new GemmaMissing(`La scheda grafica di questo computer (${gpuName}) non riesce a far girare TranslateGemma: ` +
+              `di solito la memoria della scheda non basta, oppure Windows interrompe i calcoli troppo lunghi. Usa la traduzione veloce. ` +
+              `(Dettaglio tecnico: ${(e2 instanceof Error ? e2.message : String(e2)).slice(0, 160)})`));
+          }
+        }
+      };
+      one = text => { const r = queue.then(() => run(text)); queue = r.catch(() => {}); return r; };
     } else {
       status(`Ricerca del modello ${languageName(src)} → ${languageName(to)}…`);
       const tr = getTranslator(src, to);
