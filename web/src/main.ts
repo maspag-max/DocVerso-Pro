@@ -2,6 +2,7 @@ import './style.css';
 import { baseName, imagesToDocx, imagesToPdf, pdfToDocx, pdfToImages, type OutFile, type PageSize } from './convert';
 import { getOcr, ocrAvailable } from './ocr';
 import { AUTO, LANGUAGES, makeTranslate, translationAvailable } from './translate';
+import { DEFAULT_GLOSSARY, glossaryEnabled, loadGlossaryText, parseGlossary, saveGlossaryText, setGlossaryEnabled } from './glossary';
 import { docxTranslate } from './docx';
 import { officeStatus, officeToPdf, type OfficeStatus } from './office';
 
@@ -153,7 +154,34 @@ function renderExtra(c: Choice | undefined) {
     const langs = LANGUAGES.map(l => [l.code, l.name] as [string, string]);
     box.append(select('Da', [[AUTO, 'Rileva automaticamente'], ...langs], prefs.from, v => { prefs.from = v; savePrefs(); }));
     box.append(select('A', langs, prefs.to, v => { prefs.to = v; savePrefs(); }));
+    box.append(glossaryBox());
   }
+}
+
+/** Glossario dei termini tecnici: attivo per inglese ↔ italiano, modificabile, salvato nel browser. */
+function glossaryBox() {
+  const d = document.createElement('details'); d.className = 'glossary';
+  d.innerHTML = `<summary><label class="check"><input type="checkbox"> Glossario dei termini tecnici</label> <span class="count"></span></summary>
+    <p>Per inglese ↔ italiano: questi termini sono tradotti sempre così, con l'articolo giusto. Una riga per termine, <code>inglese = italiano</code>; se il genere non è chiaro aggiungi (m), (f), (m pl) o (f pl).</p>
+    <textarea spellcheck="false" rows="12"></textarea>
+    <div class="row"><button type="button" class="small" data-a="save">Salva</button><button type="button" class="small ghost" data-a="reset">Ripristina l'elenco iniziale</button><span class="saved"></span></div>`;
+  const cb = d.querySelector<HTMLInputElement>('input[type=checkbox]')!;
+  const ta = d.querySelector('textarea')!;
+  const count = d.querySelector<HTMLElement>('.count')!;
+  const saved = d.querySelector<HTMLElement>('.saved')!;
+  const showCount = () => { count.textContent = `(${parseGlossary(ta.value).length} termini)`; };
+  cb.checked = glossaryEnabled();
+  ta.value = loadGlossaryText();
+  showCount();
+  // La casella nel titolo non deve aprire e chiudere il riquadro
+  cb.addEventListener('click', e => e.stopPropagation());
+  cb.closest('label')!.addEventListener('click', e => { if (e.target !== cb) { e.preventDefault(); cb.click(); } });
+  cb.addEventListener('change', () => setGlossaryEnabled(cb.checked));
+  ta.addEventListener('input', () => { showCount(); saved.textContent = ''; });
+  d.querySelector('[data-a=save]')!.addEventListener('click', () => { saveGlossaryText(ta.value); saved.textContent = 'Salvato.'; });
+  d.querySelector('[data-a=reset]')!.addEventListener('click', () => { ta.value = DEFAULT_GLOSSARY; saveGlossaryText(ta.value); showCount(); saved.textContent = 'Elenco iniziale ripristinato.'; });
+  ta.addEventListener('blur', () => saveGlossaryText(ta.value));
+  return d;
 }
 
 function render() {

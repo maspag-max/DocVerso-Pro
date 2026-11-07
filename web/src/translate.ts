@@ -10,6 +10,7 @@
 import { BatchTranslator, TranslatorBacking } from '@mkljczk/bergamot-translator/translator.js';
 import { franc } from 'franc-min';
 import type { TranslateBatch } from './pdf/pdfToWord';
+import { glossaryEnabled, loadGlossaryText, parseGlossary, protect, restore } from './glossary';
 
 export const AUTO = 'auto';
 export const translationAvailable = true;
@@ -182,13 +183,29 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     status(`Ricerca del modello ${languageName(src)} → ${languageName(to)}…`);
     const tr = getTranslator(src, to);
     let done = 0;
+    // Glossario (solo inglese ↔ italiano): termini fissi protetti da segnaposti
+    const pair = (src === 'en' && to === 'it') || (src === 'it' && to === 'en');
+    const terms = pair && glossaryEnabled() ? parseGlossary(loadGlossaryText()) : [];
+    const one = (text: string) => tr.translate({ from: src, to, text, html: false }).then(r => r.target.text as string);
+    /** Una frase col glossario: parole vicarie, poi sigle ZQX, poi senza glossario. */
+    const withGlossary = async (text: string, split: boolean): Promise<string> => {
+      const p = protect(text, terms, src as 'en' | 'it');
+      if (!p.terms.length) return one(text);
+      const r = restore(await one(p.text), p, to as 'en' | 'it');
+      if (r !== null) return r;
+      // Paragrafo lungo: si riprova frase per frase (meno termini per volta, meno errori)
+      const parts = split ? text.split(/(?<=[.!?;:])\s+(?=[\p{Lu}\d"“‘(])/u) : [];
+      if (parts.length > 1) return (await Promise.all(parts.map(t => withGlossary(t, false)))).join(' ');
+      const q = protect(text, terms, src as 'en' | 'it', 'token');
+      return restore(await one(q.text), q, to as 'en' | 'it') ?? one(text);
+    };
     try {
-      return await Promise.all(texts.map(text =>
-        tr.translate({ from: src, to, text, html: false }).then(r => {
-          done++; progress?.(done, texts.length);
-          if (done === 1) status(`Traduzione ${languageName(src)} → ${languageName(to)}: ${texts.length} frasi…`);
-          return r.target.text;
-        })));
+      return await Promise.all(texts.map(async text => {
+        const out = terms.length ? await withGlossary(text, true) : await one(text);
+        done++; progress?.(done, texts.length);
+        if (done === 1) status(`Traduzione ${languageName(src)} → ${languageName(to)}: ${texts.length} frasi…`);
+        return out;
+      }));
     } catch (e) {
       // Errore (di solito la rete): il prossimo tentativo riparte da zero
       translator?.delete(); translator = null; loadedPairs = '';
@@ -199,3 +216,6 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     }
   };
 }
+
+/** Solo per le prove automatiche: traduzione diretta di un elenco di frasi. */
+(globalThis as any).docversoTranslate = (from: string, to: string, texts: string[]) => makeTranslate(from, to, () => {})(texts);
