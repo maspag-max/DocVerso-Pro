@@ -159,6 +159,7 @@ $serve = {
         # Solo file dentro la cartella dell'app
         if (-not $file.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase) -or -not [System.IO.File]::Exists($file)) {
             $res.StatusCode = 404
+            Log ("File non trovato: " + $path)
             $bytes = [System.Text.Encoding]::UTF8.GetBytes('Non trovato')
             $res.ContentLength64 = $bytes.Length
             $res.OutputStream.Write($bytes, 0, $bytes.Length)
@@ -171,6 +172,7 @@ $serve = {
             $fs.CopyTo($res.OutputStream, 1048576)
         }
     } catch {
+        Log ("Errore nel servire " + $ctx.Request.Url.AbsolutePath + ": " + $_.Exception.Message)
         try { $res.StatusCode = 500 } catch { }
     } finally {
         if ($fs) { $fs.Dispose() }

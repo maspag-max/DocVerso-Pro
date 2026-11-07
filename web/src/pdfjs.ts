@@ -10,8 +10,23 @@ const base = import.meta.env.BASE_URL + 'pdfjs/';
 
 export const OPS = pdfjs.OPS as unknown as Record<string, number>;
 
+/**
+ * Un solo lavoratore per tutta la sessione: si carica alla prima conversione e poi si riusa
+ * (prima se ne creava uno nuovo per ogni PDF, e ogni volta lo si richiedeva al server).
+ */
+let worker: InstanceType<typeof pdfjs.PDFWorker> | null = null;
+
 export async function openPdf(bytes: Uint8Array) {
+  if (worker?.destroyed) worker = null;
+  worker ??= new pdfjs.PDFWorker();
+  try {
+    await worker.promise;
+  } catch (e) {
+    worker.destroy(); worker = null;
+    throw new Error('Non riesco a caricare una parte di DocVerso: la finestra nera di DocVerso è ancora aperta? Se l\'hai chiusa, riavvia DocVerso.bat e ricarica la pagina (F5).', { cause: e });
+  }
   return pdfjs.getDocument({
+    worker,
     data: bytes,
     fontExtraProperties: true,
     standardFontDataUrl: base + 'standard_fonts/',
