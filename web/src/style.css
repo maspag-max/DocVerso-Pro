@@ -162,3 +162,13 @@ h2 { font-size: 22px; line-height: 1.25; font-weight: 700; margin: 0 0 18px; let
   .theme button { padding: 4px 9px; font-size: 13px; }
   .sheet { width: calc(100% - 20px); }
 }
+
+/* Finestra della password dei PDF protetti */
+dialog.pwd { border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; background: var(--sheet); color: var(--ink); max-width: min(420px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+dialog.pwd::backdrop { background: rgba(0,0,0,.35); }
+dialog.pwd h3 { margin: 0 0 8px; font-size: 18px; }
+dialog.pwd p { margin: 0 0 12px; color: var(--ink-soft); font-size: 14px; line-height: 1.45; }
+dialog.pwd input { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; }
+dialog.pwd .row { display: flex; gap: 8px; margin-top: 14px; }
+dialog.pwd button.small { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--stamp); background: var(--stamp); color: var(--stamp-ink); font: inherit; cursor: pointer; }
+dialog.pwd button.ghost { background: transparent; color: var(--stamp); }

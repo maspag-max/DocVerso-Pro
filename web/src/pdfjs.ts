@@ -25,12 +25,32 @@ export async function openPdf(bytes: Uint8Array) {
     worker.destroy(); worker = null;
     throw new Error('Non riesco a caricare una parte di DocVerso: la finestra nera di DocVerso Pro è ancora aperta? Se l\'hai chiusa, riavvia DocVerso-Pro.bat e ricarica la pagina (F5).', { cause: e });
   }
-  return pdfjs.getDocument({
+  const task = pdfjs.getDocument({
     worker,
     data: bytes,
     fontExtraProperties: true,
     standardFontDataUrl: base + 'standard_fonts/',
     cMapUrl: base + 'cmaps/',
     cMapPacked: true,
-  }).promise;
+  });
+  // PDF che si apre solo con una password: la si chiede (resta sul computer come il resto)
+  let cancelled = false;
+  task.onPassword = (update: (password: string) => void, reason: number) => {
+    const wrong = reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD;
+    (askPassword ? askPassword(wrong) : Promise.resolve(null)).then(p => {
+      if (p == null) { cancelled = true; void task.destroy(); } else update(p);
+    });
+  };
+  try {
+    return await task.promise;
+  } catch (e) {
+    if (cancelled || (e as Error)?.name === 'PasswordException')
+      throw new Error('Questo PDF si apre solo con una password: senza la password non si può convertire.', { cause: e });
+    throw e;
+  }
 }
+
+/** Chiede la password di un PDF protetto ([wrong]: quella data prima era sbagliata); null = annullato. */
+export type AskPassword = (wrong: boolean) => Promise<string | null>;
+let askPassword: AskPassword | null = null;
+export function setPasswordAsker(f: AskPassword) { askPassword = f; }

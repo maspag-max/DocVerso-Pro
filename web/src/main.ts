@@ -1,4 +1,5 @@
 import './style.css';
+import { setPasswordAsker } from './pdfjs';
 import { baseName, imagesToDocx, imagesToPdf, pdfToDocx, pdfToImages, type OutFile, type PageSize } from './convert';
 import { getOcr, ocrAvailable } from './ocr';
 import { AUTO, LANGUAGES, makeTranslate, translationAvailable, type Engine } from './translate';
@@ -287,3 +288,26 @@ $('again').addEventListener('click', () => {
 });
 
 render();
+
+// ------------------------------------------------------------------ password dei PDF protetti
+
+/** Finestra che chiede la password di un PDF che si apre solo con una password. */
+setPasswordAsker(wrong => new Promise(resolve => {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'pwd';
+  dlg.innerHTML = `<form method="dialog">
+    <h3>PDF protetto da password</h3>
+    <p>${wrong ? '<b>La password non è giusta.</b> Riprova.' : 'Questo PDF si apre solo con una password. Scrivila qui: resta sul tuo computer, come il documento.'}</p>
+    <input type="password" autocomplete="off" spellcheck="false" aria-label="Password del PDF">
+    <div class="row"><button value="ok" class="small">Apri</button><button value="no" class="small ghost" formnovalidate>Annulla</button></div>
+  </form>`;
+  document.body.append(dlg);
+  const input = dlg.querySelector('input')!;
+  dlg.addEventListener('close', () => {
+    const ok = dlg.returnValue === 'ok' && input.value !== '';
+    resolve(ok ? input.value : null);
+    dlg.remove();
+  });
+  dlg.showModal();
+  input.focus();
+}));
