@@ -344,7 +344,7 @@ object ExactLayout {
                 // Un titolo (grassetto/corsivo diverso dal testo che segue) non si fonde con il paragrafo
                 if (styleOf(pv, fonts) != styleOf(nx, fonts)) break
                 val ok = pvOneSeg && nx.segs.size == 1 && aligned &&
-                    abs(nx.size - pv.size) < 0.6f && step > 0f && step < pv.size * 1.8f && sameStep && reach(pv)
+                    abs(nx.size - pv.size) < max(0.6f, 0.075f * pv.size) && step > 0f && step < pv.size * 1.8f && sameStep && reach(pv)
                 if (!ok) break
                 group += nx
             }

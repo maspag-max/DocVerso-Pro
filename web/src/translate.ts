@@ -245,6 +245,8 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
     };
     const t0 = performance.now();
     try {
+      // Testo dal riconoscimento (scansioni): parole corte attaccate alla seguente ("ofplants", "inthe")
+      if (src === 'en') texts = texts.map(unglueEnglish);
       return await Promise.all(texts.map(async text => {
         const out = terms.length ? await withGlossary(text, true) : await one(text);
         done++; progress?.(done, texts.length);
@@ -271,3 +273,15 @@ export function makeTranslate(from: string, to: string, status: (m: string) => v
 
 /** Solo per le prove automatiche: traduzione diretta di un elenco di frasi. */
 (globalThis as any).docversoTranslate = (from: string, to: string, texts: string[], engine: Engine = 'veloce') => makeTranslate(from, to, m => console.log(m), engine)(texts);
+
+/**
+ * L'OCR a volte non vede lo spazio dopo una parola corta, soprattutto nel corsivo: "safety ofplants",
+ * "oftechnological", "inthe". Il traduttore non le capisce: si staccano. Solo casi sicuri.
+ */
+export function unglueEnglish(text: string): string {
+  return text
+    // of + parola (non "off…", "often", "oftentimes")
+    .replace(/\b([Oo])f(?!f)(?!ten(?:times)?\b)([a-z]{3,})\b/g, '$1f $2')
+    // preposizione/congiunzione + the/a/an attaccati: "inthe", "tothe", "andthe", "ofthe", "forthe"
+    .replace(/\b(of|in|to|and|on|at|for|by|with|from|into|that|is|are|was|were)(the|these|those|this)\b/gi, '$1 $2');
+}
