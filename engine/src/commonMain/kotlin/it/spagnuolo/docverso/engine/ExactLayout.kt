@@ -138,6 +138,8 @@ object ExactLayout {
         fun near(a: DocItem.Anchor, b: DocItem.Anchor) = a.x < b.x + b.w + 8f && b.x < a.x + a.w + 8f && a.y < b.y + b.h + 8f && b.y < a.y + a.h + 8f
         val inline = pictures.filter { a ->
             if (a.behind || a.w < 20f || a.h < 12f) return@filter false
+            // Fuori dai margini (fasce in cima o in fondo alla pagina, testate): ferme, nel testo finirebbero più giù
+            if (a.y < mT - 1f || a.y + a.h > page.h - mB + 1f || a.x < mL - 6f || a.x + a.w > page.w - mR + 6f) return@filter false
             if (pictures.any { b -> b !== a && !b.behind && near(a, b) }) return@filter false
             val side = sideOf(a.x, a.x + a.w)
             lines.none { ln -> ln.top < a.y + a.h - 1f && ln.bottom > a.y + 1f && (gxs == null || sideOf(ln.l, ln.r) == side || sideOf(ln.l, ln.r) == 0) && ln.l < a.x + a.w + 40f && ln.r > a.x - 40f } &&

@@ -364,6 +364,8 @@ object ScanExact {
             // Macchia (foto, logo, codice a barre letti come testo): zona molto piena letta con poca sicurezza,
             // o "parola" senza lettere né cifre. Le parole lette con sicurezza restano anche se in grassetto.
             val letters = it.text.count { c -> c.isLetterOrDigit() }
+            // Trattino di un elenco o di una frase (corto, basso e largo): è testo, non una macchia
+            if (it.text.trim() in setOf("-", "–", "—", "‒", "−") && hh < medH * 0.45f && ww > hh * 1.3f) { good += OcrWord("-", it.l, it.t, it.r, it.b, it.line, it.base, it.confidence); continue }
             if ((ink >= 0.6f && it.confidence < 80f && letters <= 3) || ink >= 0.85f || (ink >= 0.5f && letters == 0)) continue
             good += it
         }
@@ -371,7 +373,7 @@ object ScanExact {
         for ((_, ws) in good.groupBy { it.line }) {
             val first = ws.minByOrNull { it.l } ?: continue
             val next = ws.filter { it !== first }.minByOrNull { it.l } ?: continue
-            if (first.text in setOf("e", "°", "*", "«", "»", "o", "©", "®", "+", "-", "•") && next.l - first.r > medH * 0.6f && (first.r - first.l) < medH * 0.7f && inkFraction(first.l, first.t, first.r, first.b) > 0.35f) {
+            if (first.text in setOf("e", "°", "*", "«", "»", "o", "©", "®", "+", "•") && next.l - first.r > medH * 0.6f && (first.r - first.l) < medH * 0.7f && inkFraction(first.l, first.t, first.r, first.b) > 0.35f) {
                 good[good.indexOf(first)] = OcrWord("•", first.l, first.t, first.r, first.b, first.line, first.base)
             }
         }
@@ -437,6 +439,9 @@ object ScanExact {
         }
         val inks = words2.map { inkFraction(it.l, it.t, it.r, it.b) }.sorted()
         val medInk = if (inks.isEmpty()) 0.2f else inks[inks.size / 2]
+        // Immagini a bassa risoluzione (lettere piccole in pixel, contorni sfumati): fra normale e grassetto
+        // la differenza d'inchiostro è minore
+        val boldRatio = if (medH < 22f) 1.2f else 1.32f
         val fonts = listOf(ExactLayout.Font("Arial", false, false), ExactLayout.Font("Arial", true, false), ExactLayout.Font("Segoe UI Symbol", false, false))
 
         class Measured(val seg: Seg, val base: Float, val sizeH: Float, val sizeW: Float, val bold: Boolean)
@@ -448,7 +453,7 @@ object ScanExact {
             val sizeH = ((base - top) / 0.72f).coerceAtLeast(4f) * s
             // Corpo dalla larghezza: il testo in Arial deve occupare quanto nell'originale (i caratteri veri sono spesso più stretti)
             val real = ws.sumOf { ((it.r - it.l) * s).toDouble() }.toFloat()
-            val bold = ws.map { inkFraction(it.l, it.t, it.r, it.b) }.average().toFloat() > medInk * 1.32f && ws.size <= 12
+            val bold = ws.map { inkFraction(it.l, it.t, it.r, it.b) }.average().toFloat() > medInk * boldRatio && ws.size <= 12
             val est = ws.sumOf { Widths.arial(it.text, bold).toDouble() }.toFloat()
             val sizeW = if (est > 0f) real / est else sizeH
             Measured(sg, base, sizeH, sizeW, bold)
@@ -456,12 +461,27 @@ object ScanExact {
         // Stesso corpo per le righe dello stesso paragrafo (mediana), mai più largo dell'originale
         val byPara = measured.groupBy { it.seg.para }
         val glyphs = ArrayList<ExactLayout.Glyph>()
+        // Trattino o pallino da solo (inizio di un elenco): la sua altezza non dice il corpo; si usa quello
+        // del testo che lo segue sulla stessa riga
+        // Corpi della pagina: i più usati (testo, tabelle, note). Un corpo vicino a uno di questi diventa quello:
+        // le misure dall'immagine oscillano, il documento originale ne usa pochi (altrimenti le tabelle si
+        // allungano e il testo scivola alla pagina dopo)
+        val weights = HashMap<Float, Int>()
+        for (m in measured) { val k = (min(m.sizeH, m.sizeW * 1.03f) * 2f).roundToInt() / 2f; weights[k] = (weights[k] ?: 0) + m.seg.ws.sumOf { it.text.length } }
+        val totalW = weights.values.sum().coerceAtLeast(1)
+        val common = weights.entries.filter { it.value >= totalW * 0.08f }.sortedByDescending { it.value }.take(4).map { it.key }
+        fun snap(v: Float): Float {
+            val c = common.minByOrNull { abs(it - v) } ?: return v
+            return if (abs(c - v) <= c * 0.2f) c else v
+        }
+        fun lone(m: Measured) = m.seg.ws.size == 1 && m.seg.ws[0].text in setOf("-", "•", "–")
         for (m in measured) {
-            val peers = byPara[m.seg.para].orEmpty().filter { abs(it.sizeH - m.sizeH) < m.sizeH * 0.25f }
+            val mate = if (lone(m)) measured.filter { o -> o !== m && !lone(o) && abs(o.base - m.base) < o.sizeH / s * 0.4f && o.seg.ws.minOf { it.l } > m.seg.ws[0].r }.minByOrNull { o -> o.seg.ws.minOf { it.l } } else null
+            val peers = byPara[(mate ?: m).seg.para].orEmpty().filter { abs(it.sizeH - (mate ?: m).sizeH) < (mate ?: m).sizeH * 0.25f }
             val hs = peers.map { it.sizeH }.sorted()
-            val sizeH = if (hs.isEmpty()) m.sizeH else hs[hs.size / 2]
-            val sizeW = if (m.seg.ws.sumOf { it.text.length } >= 4) m.sizeW else sizeH
-            val size = (min(sizeH, sizeW * 1.03f) * 2f).roundToInt() / 2f
+            val sizeH = if (hs.isEmpty()) (mate ?: m).sizeH else hs[hs.size / 2]
+            val sizeW = if (mate != null) mate.sizeW else if (m.seg.ws.sumOf { it.text.length } >= 4) m.sizeW else sizeH
+            val size = snap((min(sizeH, sizeW * 1.03f) * 2f).roundToInt() / 2f)
             note("riga ${m.seg.ws.joinToString(" ") { it.text }.take(40)}: corpo ${size} (H ${sizeH}, W ${sizeW}) base ${m.base * s}")
             for (wd in m.seg.ws) glyphs += ExactLayout.Glyph(wd.text, wd.l * s, m.base * s, (wd.r - wd.l) * s, size.coerceIn(5f, 72f), if (m.bold) 1 else 0, wordColor(px, w, h, wd, thr))
         }
@@ -519,12 +539,17 @@ object ScanExact {
         val x0 = wd.l.toInt().coerceIn(0, w - 1); val x1 = wd.r.toInt().coerceIn(x0 + 1, w)
         val y0 = wd.t.toInt().coerceIn(0, h - 1); val y1 = wd.b.toInt().coerceIn(y0 + 1, h)
         for (y in y0 until y1 step 2) for (x in x0 until x1 step 2) { val c = px[y * w + x]; if (lum(c) < thr) cols += c }
-        if (cols.size < 5) return 0
+        if (cols.size < 15) return 0 // parola piccola: troppo pochi pixel per capire il colore
         cols.sortBy { lum(it) }
-        val darkest = cols.subList(0, max(1, cols.size / 2))
-        fun med(sh: Int) = darkest.map { it shr sh and 255 }.sorted()[darkest.size / 2]
-        val r = med(16); val g = med(8); val b = med(0)
+        // Solo il cuore delle lettere (il 20% più scuro): i bordi sfumati o colorati restano fuori
+        val darkest = cols.subList(0, max(3, cols.size / 5).coerceAtMost(cols.size))
+        // Media, non mediana per canale: i bordi colorati delle lettere (ClearType delle catture dello schermo,
+        // sbavature del JPEG) sono metà blu e metà arancio, e nella media si annullano in grigio
+        fun avg(sh: Int) = darkest.sumOf { it shr sh and 255 } / darkest.size
+        val r = avg(16); val g = avg(8); val b = avg(0)
         val hi = maxOf(r, g, b); val lo = minOf(r, g, b)
-        return if (hi - lo < 40 || hi < 70) 0 else (r shl 16) or (g shl 8) or b
+        // Colore vero solo se netto (testo rosso, blu…), non una sfumatura
+        // Colori molto scuri (canale più forte sotto 100) a occhio sono neri: di solito sono sbavature
+        return if (hi - lo < 50 || hi - lo < hi * 0.35f || hi < 100) 0 else (r shl 16) or (g shl 8) or b
     }
 }

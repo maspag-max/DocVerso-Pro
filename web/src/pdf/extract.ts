@@ -63,6 +63,8 @@ export interface Extracted {
   missing: number;
   /** Lettere visibili con un carattere leggibile. */
   visibleChars: number;
+  /** Lettere del testo invisibile (strato OCR di un PDF scansionato e reso ricercabile). */
+  hidden: JsGlyph[];
 }
 
 interface State {
@@ -80,6 +82,7 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
   const fonts: JsFont[] = [];
   const fontIndex = new Map<string, number>();
   const glyphs: JsGlyph[] = [];
+  const hidden: JsGlyph[] = [];
   const fills: JsBox[] = [];
   const art: JsBox[] = [];
   const pics: JsPic[] = [];
@@ -138,6 +141,14 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
       if (typeof g === 'number') { x += (vertical ? 1 : -1) * g * size / 1000; continue; }
       const spacing = (g.isSpace ? st.wordSpacing : 0) + st.charSpacing;
       const adv = (g.width ?? 0) * fm[0] * size;
+      // Testo invisibile sopra una scansione (OCR già fatto, es. OCRmyPDF): tenuto a parte
+      if (invisible && horizontal && !vertical && hidden.length < MAX_GLYPHS) {
+        const ch: string = g.unicode ?? '';
+        if (ch) {
+          const [px, py] = apply(full, tx + x * st.hScale, ty + st.rise);
+          hidden.push({ ch, x: px, base: py, w: Math.abs(adv * st.hScale * sx), size: size * sy, font: idx, color: 0 });
+        }
+      }
       if (!vertical && (horizontal || rot) && !invisible && glyphs.length < MAX_GLYPHS) {
         const ch: string = symbolChar(g.unicode ?? '', fonts[idx].name);
         if (!ch) { if (horizontal) missing++; }
@@ -328,5 +339,5 @@ export async function extractPage(page: PDFPageProxy, OPS: Record<string, number
   pics.sort((a, b) => (a as any).order - (b as any).order);
 
   const visibleChars = glyphs.filter(g => g.ch.trim().length > 0).length;
-  return { page: { w: vp.width, h: vp.height, fonts, glyphs, fills, art, pics }, missing, visibleChars };
+  return { page: { w: vp.width, h: vp.height, fonts, glyphs, fills, art, pics }, missing, visibleChars, hidden };
 }

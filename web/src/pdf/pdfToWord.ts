@@ -6,7 +6,7 @@
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { zipSync } from 'fflate';
 import { extractPage, type PdfImage } from './extract';
-import { fromK, toK, type JsWord } from '../engine-types';
+import { fromK, toK, type JsGlyph, type JsWord } from '../engine-types';
 import { padWords } from '../ocr-words';
 import * as engine from '../engine/docverso-engine.mjs';
 
@@ -117,7 +117,10 @@ export async function pdfToWord(pdf: PDFDocumentProxy, opt: PdfToWordOptions): P
     } else {
       opt.progress?.(n - 1, total, `Pagina ${n} di ${total}: riconoscimento del testo`);
       const raster = await opt.platform.render(page, OCR_SCALE);
-      await addScanPage(builder, raster, opt.platform, opt.ocr, opt.scanMode);
+      // PDF scansionato e già reso ricercabile (OCRmyPDF, PDF_Scanner, Acrobat…): si usa il suo testo,
+      // riconosciuto sull'immagine originale, invece di rifare l'OCR sull'immagine ridisegnata
+      const layer = ex.hidden.filter(g => g.ch.trim()).length >= 20 ? layerWords(ex.hidden, raster, OCR_SCALE) : null;
+      await addScanPage(builder, raster, opt.platform, opt.ocr, opt.scanMode, layer);
       raster.release();
     }
     page.cleanup();
@@ -132,9 +135,20 @@ export async function pdfToWord(pdf: PDFDocumentProxy, opt: PdfToWordOptions): P
  * "exact" = come un PDF digitale (tabelle dalle linee, testo in posizione); "flow" = impaginazione a flusso
  * di TradScan (più adatta alle foto storte o curve). Senza OCR o senza testo: la pagina come immagine.
  */
-export async function addScanPage(builder: engine.WordBuilder, raster: Raster, platform: Platform, ocr?: Ocr, mode: 'exact' | 'flow' = 'exact') {
+export async function addScanPage(builder: engine.WordBuilder, raster: Raster, platform: Platform, ocr?: Ocr, mode: 'exact' | 'flow' = 'exact', given?: JsWord[] | null) {
   let r = raster;
   let px = raster.pixels();
+  // Con il testo già riconosciuto nel PDF la pagina non si raddrizza: le posizioni delle sue parole sono su
+  // questa immagine. L'OCR di DocVerso legge di solito meglio; dal testo del PDF si prendono le parole che
+  // l'OCR ha saltato (trattini degli elenchi, parole corte, numeri)
+  if (given?.length) {
+    const mine = ocr ? await ocr(r) : null;
+    const words = mine?.length ? mergeWords(mine, given) : given;
+    const crop = (l: number, t: number, w: number, h: number) => toK(platform.jpeg(r.crop(l, t, w, h), 0.88));
+    if (mode === 'exact') builder.addScanExactPage(words as any, r.width, r.height, px, crop);
+    else builder.addOcrPage(padWords(words) as any, r.width, r.height, px, crop);
+    return;
+  }
   if (ocr && mode === 'exact') {
     const angle = engine.skewAngle(r.width, r.height, px);
     // Ruotando dell’angolo opposto la pagina si raddrizza
@@ -163,4 +177,71 @@ export function zipParts(parts: engine.DocPart[]): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   for (const p of parts) files[p.name] = fromK(p.data);
   return zipSync(files, { level: 6 });
+}
+
+/**
+ * Parole dallo strato di testo invisibile, in pixel dell'immagine ridisegnata ([scale] pixel per punto).
+ * Il riquadro di ogni parola si stringe sull'inchiostro vero (altezza delle lettere, per dimensione e grassetto).
+ */
+export function layerWords(hidden: JsGlyph[], raster: Raster, scale: number): JsWord[] {
+  const gs = hidden.filter(g => g.size > 1).sort((a, b) => a.base - b.base || a.x - b.x);
+  // Righe: stessa linea di base
+  const rows: JsGlyph[][] = [];
+  for (const g of gs) {
+    const row = rows.find(r => Math.abs(r[0].base - g.base) < 0.3 * Math.min(r[0].size, g.size));
+    if (row) row.push(g); else rows.push([g]);
+  }
+  rows.sort((a, b) => a[0].base - b[0].base);
+  const W = raster.width, H = raster.height;
+  const px = raster.pixels();
+  const dark = (x: number, y: number) => { const c = px[y * W + x]; return ((c >> 16 & 255) * 3 + (c >> 8 & 255) * 6 + (c & 255)) / 10 < 150; };
+  const out: JsWord[] = [];
+  rows.forEach((row, line) => {
+    row.sort((a, b) => a.x - b.x);
+    let cur: JsGlyph[] = [];
+    const flush = () => {
+      const vis = cur.filter(g => g.ch.trim());
+      cur = [];
+      if (!vis.length) return;
+      const size = Math.max(...vis.map(g => g.size));
+      const base = vis.map(g => g.base).sort((a, b) => a - b)[vis.length >> 1];
+      let l = Math.max(0, Math.floor(vis[0].x * scale)), r = Math.min(W - 1, Math.ceil((vis[vis.length - 1].x + vis[vis.length - 1].w) * scale));
+      let t = Math.max(0, Math.floor((base - size * 0.85) * scale)), b = Math.min(H - 1, Math.ceil((base + size * 0.3) * scale));
+      // Inchiostro dentro il riquadro: righe e colonne con pixel scuri
+      let it = -1, ib = -1, il = -1, ir = -1;
+      for (let y = t; y <= b; y++) for (let x = l; x <= r; x++) if (dark(x, y)) {
+        if (it < 0) it = y; ib = y; if (il < 0 || x < il) il = x; if (x > ir) ir = x;
+      }
+      if (it >= 0 && ib - it >= 2) { t = it; b = ib; l = il; r = ir; }
+      out.push({ text: vis.map(g => g.ch).join(''), l, t, r: r + 1, b: b + 1, line, base: base * scale, confidence: 95 } as JsWord);
+    };
+    for (const g of row) {
+      const prev = cur[cur.length - 1];
+      if (!g.ch.trim()) { flush(); continue; }
+      if (prev && g.x - (prev.x + prev.w) > 0.15 * g.size) flush();
+      cur.push(g);
+    }
+    flush();
+  });
+  return out;
+}
+
+/** Parole dell'OCR più quelle del testo del PDF che non si sovrappongono a nessuna parola dell'OCR. */
+function mergeWords(ocr: JsWord[], layer: JsWord[]): JsWord[] {
+  const out = [...ocr];
+  const lineOf = (w: JsWord) => {
+    // Riga dell'OCR alla stessa altezza (per mettere la parola aggiunta sulla riga giusta)
+    const cy = (w.t + w.b) / 2;
+    const near = ocr.filter(o => cy > o.t && cy < o.b).sort((a, b) => Math.abs((a.t + a.b) / 2 - cy) - Math.abs((b.t + b.b) / 2 - cy))[0];
+    return near ? near.line : -1;
+  };
+  let extraLine = Math.max(0, ...ocr.map(o => o.line)) + 1;
+  for (const w of layer) {
+    const ix = (o: JsWord) => Math.max(0, Math.min(o.r, w.r) - Math.max(o.l, w.l)) * Math.max(0, Math.min(o.b, w.b) - Math.max(o.t, w.t));
+    const area = Math.max(1, (w.r - w.l) * (w.b - w.t));
+    if (ocr.some(o => ix(o) > 0.15 * area)) continue;
+    const line = lineOf(w);
+    out.push({ ...w, line: line >= 0 ? line : extraLine++, confidence: 80 } as JsWord);
+  }
+  return out;
 }
